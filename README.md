@@ -70,7 +70,28 @@ npm test
 node --test tests/*.test.js
 ```
 
-当前：**43 个测试全部通过。**
+当前：**47 个测试（46 通过 / 0 失败 / 1 跳过）。**
+
+> 跳过的 1 项是 `CTF-All-In-One` 电子书校验——该文件被 Windows Defender 阻断，需用户手动恢复后才会重新纳入校验。详见「测试电子书素材」一节。
+
+## 测试电子书素材
+
+项目提供 `tools/build_ebooks.py`，可从**明确开源授权**的 GitHub 书籍仓库生成 TXT 测试素材，默认输出到 `D:\电子书资源\txt`：
+
+```
+npm run ebooks          # 生成全部
+npm run ebooks OWASP    # 只生成某一本
+npm run ebooks:check    # 抽查内容质量
+```
+
+生成规则：
+
+- 只选择许可证允许复制分发的仓库（如 CC0-1.0 / CC-BY-SA-4.0 / GPL-3.0）
+- 按官方 `SUMMARY.md` 决定章节顺序，Markdown 与 reStructuredText 均支持
+- 输出章节行统一为「第N章 标题」，保证能被本项目的解析器识别为目录
+- 编码为 UTF-8 with BOM，兼容 Windows 记事本
+
+**注意：** 含大量 exploit 代码的书籍可能被 Windows Defender 判定为威胁并阻断（表现为文件存在但无法打开，errno -4094）。此时请到「Windows 安全中心 → 保护历史记录」还原，并将 `D:\电子书资源` 加入排除项。不要为了生成测试素材关闭防护。
 
 ## 已知限制（诚实说明）
 
