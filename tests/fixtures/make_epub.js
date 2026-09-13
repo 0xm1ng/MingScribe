@@ -164,9 +164,16 @@ function opfDoc(opts) {
   if (opts.nav) items.push('  <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>');
   if (opts.ncx) items.push('  <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>');
   if (opts.blank) items.push('  <item id="blank" href="blank.xhtml" media-type="application/xhtml+xml"/>');
+  if (opts.cover) {
+    items.push('  <item id="cover" href="wrap0000.xhtml" media-type="application/xhtml+xml" properties="svg"/>');
+    items.push('  <item id="coverimg" href="cover.png" media-type="image/png" properties="cover-image"/>');
+  }
 
   const refs = CHAPTERS.map((c, i) => `  <itemref idref="c${i + 1}"/>`);
   if (opts.blank) refs.push('  <itemref idref="blank"/>');
+  // 真实 EPUB（古腾堡 / Calibre 产出）几乎都把封面页放在 spine 首位，
+  // 它只有一张图、没有任何文字，不应变成一章
+  if (opts.cover) refs.unshift('  <itemref idref="cover"/>');
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="${opts.nav ? '3.0' : '2.0'}" unique-identifier="id">
@@ -186,10 +193,11 @@ ${refs.join('\n')}
 
 /**
  * 构造样例 EPUB。
- * @param {{nav?: boolean, ncx?: boolean, blank?: boolean, navTitles?: string[], ncxTitles?: string[]}} opts
+ * @param {{nav?: boolean, ncx?: boolean, blank?: boolean, cover?: boolean,
+ *          navTitles?: string[], ncxTitles?: string[]}} opts
  */
 function buildSampleEpub(opts) {
-  const o = Object.assign({ nav: true, ncx: true, blank: false }, opts);
+  const o = Object.assign({ nav: true, ncx: true, blank: false, cover: true }, opts);
   const titles = o.ncxTitles || CHAPTERS.map((c) => c.title);
   const navTitles = o.navTitles || CHAPTERS.map((c) => c.title);
 
@@ -208,6 +216,14 @@ function buildSampleEpub(opts) {
   });
   if (o.blank) {
     entries.push({ name: 'OEBPS/blank.xhtml', data: XHTML_HEAD + '<p>　</p><p> </p></body></html>' });
+  }
+  if (o.cover) {
+    // 纯 SVG 封面页：没有任何文字，解析后应为空，不占章节
+    entries.push({
+      name: 'OEBPS/wrap0000.xhtml',
+      data: XHTML_HEAD + '<div><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800">' +
+        '<image width="600" height="800" xlink:href="cover.png"/></svg></div></body></html>'
+    });
   }
 
   return buildZip(entries);

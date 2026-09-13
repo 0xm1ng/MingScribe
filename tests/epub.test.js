@@ -27,6 +27,20 @@ test('EPUB3：书名、章节数与 nav 目录标题', async () => {
   assert.deepEqual(book.chapters.map((c) => c.title), navTitles);
 });
 
+test('spine 首位的纯 SVG 封面页不产生文字，也不占章节', async () => {
+  const withCover = await parse(buildSampleEpub({ cover: true }));
+  const without = await parse(buildSampleEpub({ cover: false }));
+
+  assert.equal(withCover.chapters.length, without.chapters.length, '封面页被误当成了一章');
+  assert.equal(withCover.chapters[0].title, without.chapters[0].title, '封面页影响了首章标题');
+  assert.equal(withCover.totalChars, without.totalChars, '封面页产生了多余文字');
+  assert.deepEqual(
+    withCover.chapters.map((c) => c.text),
+    without.chapters.map((c) => c.text),
+    '封面页改变了正文内容或偏移'
+  );
+});
+
 test('stored 与 deflate 混合压缩的条目都能读出', async () => {
   const book = await parse(buildSampleEpub());
   // 夹具里第一章是 stored，其余是 deflate；两章都有正文即证明两条路径都通
