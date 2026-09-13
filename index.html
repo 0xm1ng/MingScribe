@@ -39,6 +39,7 @@
     </div>
     <button id="btn-toc" class="icon-btn" type="button" title="目录">目录</button>
     <button id="btn-search" class="icon-btn" type="button" title="搜索正文（Ctrl+F）">搜索</button>
+    <button id="btn-notes" class="icon-btn" type="button" title="我的划线（Ctrl+M）">笔记</button>
     <button id="btn-font-down" class="icon-btn" type="button" title="缩小字号">A−</button>
     <button id="btn-font-up" class="icon-btn" type="button" title="放大字号">A+</button>
     <button id="btn-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
@@ -63,7 +64,38 @@
     <ol id="search-results" class="search-results"></ol>
   </aside>
 
+  <aside id="notes-panel" class="notes-panel" hidden>
+    <div class="side-head">
+      <span class="panel-title">我的划线（<span id="notes-count">0</span>）</span>
+      <button id="btn-export" class="link-btn" type="button" title="导出为 Markdown 文件">导出</button>
+      <button id="btn-notes-close" class="link-btn" type="button">关闭</button>
+    </div>
+    <p id="notes-hint" class="side-count muted">在正文里选中一段文字，就会出现划线按钮。</p>
+    <ol id="notes-list" class="notes-list"></ol>
+  </aside>
+
   <main id="reader-content" class="reader-content" tabindex="0"></main>
+
+  <div id="hl-toolbar" class="hl-toolbar" hidden>
+    <button class="hl-swatch hl-yellow" data-color="yellow" type="button" title="黄色"></button>
+    <button class="hl-swatch hl-green" data-color="green" type="button" title="绿色"></button>
+    <button class="hl-swatch hl-blue" data-color="blue" type="button" title="蓝色"></button>
+    <button class="hl-swatch hl-pink" data-color="pink" type="button" title="粉色"></button>
+    <span class="hl-divider"></span>
+    <button id="hl-add-note" class="hl-act" type="button">批注</button>
+    <button id="hl-cancel" class="hl-act" type="button">取消</button>
+  </div>
+
+  <div id="note-popover" class="note-popover" hidden>
+    <div id="note-quote" class="note-quote"></div>
+    <textarea id="note-input" rows="3" placeholder="写下你的想法…（可以为空，只保留划线）"></textarea>
+    <div class="note-actions">
+      <button id="note-save" class="btn" type="button">保存批注</button>
+      <button id="note-color" class="link-btn" type="button">换颜色</button>
+      <button id="note-delete" class="link-btn" type="button">删除划线</button>
+      <button id="note-close" class="link-btn" type="button">关闭</button>
+    </div>
+  </div>
 
   <footer class="reader-foot">
     <button id="btn-prev" class="btn" type="button">上一章</button>
@@ -88,6 +120,9 @@
 <script src="src/parser.js"></script>
 <script src="src/progress.js"></script>
 <script src="src/search.js"></script>
+<script src="src/decorate.js"></script>
+<script src="src/annotations.js"></script>
+<script src="src/exporter.js"></script>
 <script src="src/bookstore.js"></script>
 <script src="src/app.js"></script>
 </body>

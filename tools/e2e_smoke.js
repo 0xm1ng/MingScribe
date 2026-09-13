@@ -16,6 +16,8 @@ const BIG = 'D:\\电子书资源\\txt\\Hello-CTF - 开源CTF入门教程.txt';
 const SMALL = 'D:\\电子书资源\\txt\\Web安全学习笔记.txt';
 const REPORT = 'D:\\MingScribe\\tools\\_e2e_report.txt';
 const SHOT = 'D:\\MingScribe\\tools\\_e2e_shot.png';
+const EXPORT_MD = 'D:\\MingScribe\\tools\\_e2e_export.md';
+const SHOT_NOTES = 'D:\\MingScribe\\tools\\_e2e_notes.png';
 
 const lines = [];
 function log(text) { lines.push(text); }
@@ -30,7 +32,11 @@ function sizeOf(p) {
     headless: true,
     args: ['--allow-file-access-from-files']
   });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    acceptDownloads: true
+  });
+  const page = await context.newPage();
 
   const errors = [];
   page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
@@ -153,6 +159,151 @@ function sizeOf(p) {
   );
   log('8. 打开小书 Web 安全学习笔记（' + sizeOf(SMALL) + '）：' + (Date.now() - t2) + ' ms');
 
+  /* ---- 划线：选中 → 工具条 → 上色 ---- */
+  log('');
+  const picked = await page.evaluate(() => {
+    const p = document.querySelector('#reader-content [data-off]');
+    if (!p || !p.firstChild || p.firstChild.nodeType !== 3) return null;
+
+    const node = p.firstChild;
+    const length = Math.min(10, node.nodeValue.length);
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, length);
+
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.getElementById('reader-content')
+      .dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    return { picked: node.nodeValue.slice(0, length) };
+  });
+  await page.waitForTimeout(200);
+
+  if (!picked) {
+    log('10. 划线流程：跳过（首个段落没有可选的文本节点）');
+  } else {
+    log('10. 划线流程');
+    log('    选中文字：「' + picked.picked + '」→ 工具条可见=' +
+      (await page.locator('#hl-toolbar').isVisible()));
+
+    await page.click('.hl-swatch.hl-yellow');
+    await page.waitForTimeout(250);
+
+    const afterHl = await page.evaluate(() => ({
+      marks: document.querySelectorAll('#reader-content mark.hl').length,
+      yellow: document.querySelectorAll('#reader-content mark.hl-yellow').length,
+      count: document.getElementById('notes-count').textContent,
+      toolbarHidden: document.getElementById('hl-toolbar').hidden
+    }));
+    log('    点黄色后：正文划线元素=' + afterHl.marks + '（黄色 ' + afterHl.yellow +
+      '）　侧栏计数=' + afterHl.count + '　工具条已收起=' + afterHl.toolbarHidden);
+
+    // 与已有划线重叠时必须被拒绝
+    await page.evaluate(() => {
+      const mark = document.querySelector('#reader-content mark.hl');
+      if (!mark) return;
+      const node = mark.firstChild;
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, Math.min(5, node.nodeValue.length));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.getElementById('reader-content')
+        .dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+    await page.waitForTimeout(200);
+    await page.click('.hl-swatch.hl-green');
+    await page.waitForTimeout(250);
+
+    const afterOverlap = await page.evaluate(() => ({
+      marks: document.querySelectorAll('#reader-content mark.hl').length,
+      toast: document.getElementById('toast').textContent
+    }));
+    log('    重叠划线被拒绝=' + (afterOverlap.marks === afterHl.marks) +
+      '　提示文案=' + afterOverlap.toast);
+
+    // 点击已有划线 → 写批注
+    await page.click('#reader-content mark.hl');
+    await page.waitForTimeout(200);
+    log('    点击划线 → 批注弹层可见=' + (await page.locator('#note-popover').isVisible()));
+    await page.fill('#note-input', '这里要背下来');
+    await page.click('#note-save');
+    await page.waitForTimeout(250);
+
+    const noted = await page.evaluate(() => ({
+      withNote: document.querySelectorAll('#reader-content mark.hl.with-note').length,
+      toast: document.getElementById('toast').textContent
+    }));
+    log('    保存批注：带批注标记的划线=' + noted.withNote + '　提示=' + noted.toast);
+
+    // 换颜色
+    await page.click('#reader-content mark.hl');
+    await page.waitForTimeout(150);
+    await page.click('#note-color');
+    await page.waitForTimeout(200);
+    await page.click('#note-close');
+    const recolored = await page.evaluate(() => ({
+      green: document.querySelectorAll('#reader-content mark.hl-green').length,
+      dot: document.querySelectorAll('#notes-list .note-dot.hl-green').length
+    }));
+    log('    换颜色：正文绿色划线=' + recolored.green + '　列表色点=' + recolored.dot);
+
+    // 笔记面板
+    await page.click('#btn-notes');
+    await page.waitForTimeout(200);
+    const panel = await page.evaluate(() => ({
+      visible: !document.getElementById('notes-panel').hidden,
+      items: document.querySelectorAll('#notes-list .note-item').length,
+      quote: (document.querySelector('#notes-list .note-item-quote') || {}).textContent || '',
+      note: (document.querySelector('#notes-list .note-item-note') || {}).textContent || ''
+    }));
+    log('    笔记面板：可见=' + panel.visible + '　条数=' + panel.items +
+      '　首条原文「' + panel.quote + '」　批注「' + panel.note + '」');
+
+    // 点列表项跳回正文
+    await page.click('#notes-list .note-item');
+    await page.waitForTimeout(300);
+    log('    点列表项跳转后所在章=' + (await page.locator('#reader-chapter-name').textContent()));
+    await page.screenshot({ path: SHOT_NOTES });
+
+    // 导出 Markdown
+    try {
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 15000 }),
+        page.click('#btn-export')
+      ]);
+      await download.saveAs(EXPORT_MD);
+      const md = fs.readFileSync(EXPORT_MD, 'utf8');
+      log('    导出文件：' + download.suggestedFilename());
+      log('    导出内容校验：含原文=' + md.includes(picked.picked) +
+        '　含批注=' + md.includes('这里要背下来') +
+        '　含章节标题=' + /^## /m.test(md) +
+        '　字符数=' + md.length);
+    } catch (err) {
+      log('    导出：未能捕获下载事件（' + (err && err.message ? err.message.split('\n')[0] : err) + '）');
+    }
+  }
+
+  /* ---- 刷新页面后划线是否还在 ---- */
+  log('');
+  await page.reload();
+  await page.waitForSelector('#shelf-screen:not([hidden])');
+  await page.click('#shelf-list .shelf-item button[data-action="open"]');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#reader-content [data-off]').length > 0,
+    null,
+    { timeout: 60000 }
+  );
+  await page.waitForTimeout(400);
+  const persisted = await page.evaluate(() => ({
+    marks: document.querySelectorAll('#reader-content mark.hl').length,
+    count: document.getElementById('notes-count').textContent
+  }));
+  log('11. 刷新页面后重新打开：正文划线元素=' + persisted.marks + '　侧栏计数=' + persisted.count);
+
   /* ---- 书架缓存 ---- */
   await page.click('#btn-back');
   await page.waitForTimeout(600);
@@ -164,7 +315,7 @@ function sizeOf(p) {
       };
     })
   );
-  log('9. 书架条目（验证缓存与进度写入）：');
+  log('12. 书架条目（验证缓存与进度写入）：');
   if (!shelf.length) log('   （空）');
   shelf.forEach(function (i) { log('   · ' + i.name + '  →  ' + i.meta); });
 

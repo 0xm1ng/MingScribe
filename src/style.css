@@ -537,6 +537,234 @@ body[data-theme="dark"] mark { background: rgba(255, 202, 74, 0.26); }
   color: #1a1a1a;
 }
 
+/* ---------- 划线高亮 ---------- */
+
+.reader-content mark.hit {
+  background: rgba(255, 202, 74, 0.5);
+  color: inherit;
+}
+
+.reader-content mark.hit.current {
+  background: #f0a020;
+  color: #1a1a1a;
+}
+
+.reader-content mark.hl {
+  color: inherit;
+  border-radius: 2px;
+  padding: 1px 0;
+  cursor: pointer;
+  box-shadow: inset 0 -0.5em 0 var(--hl-color);
+}
+
+.reader-content mark.hl-yellow { --hl-color: rgba(255, 214, 92, 0.55); }
+.reader-content mark.hl-green  { --hl-color: rgba(126, 217, 130, 0.5); }
+.reader-content mark.hl-blue   { --hl-color: rgba(122, 186, 245, 0.5); }
+.reader-content mark.hl-pink   { --hl-color: rgba(247, 160, 200, 0.5); }
+
+body[data-theme="dark"] .reader-content mark.hl-yellow { --hl-color: rgba(255, 214, 92, 0.22); }
+body[data-theme="dark"] .reader-content mark.hl-green  { --hl-color: rgba(126, 217, 130, 0.2); }
+body[data-theme="dark"] .reader-content mark.hl-blue   { --hl-color: rgba(122, 186, 245, 0.2); }
+body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 160, 200, 0.2); }
+
+/* 有批注的划线，右上角点一个小方块 */
+.reader-content mark.hl.with-note::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-left: 3px;
+  border-radius: 1px;
+  background: var(--accent);
+  vertical-align: super;
+}
+
+.reader-content mark.hl.flash { animation: hl-flash 1.1s ease-out 1; }
+
+@keyframes hl-flash {
+  0%   { background: var(--accent); }
+  100% { background: transparent; }
+}
+
+/* ---------- 选中文字后的划线工具条 ---------- */
+
+.hl-toolbar {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+
+.hl-toolbar[hidden] { display: none; }
+
+.hl-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.hl-swatch.hl-yellow { background: #ffe06a; }
+.hl-swatch.hl-green  { background: #7ed982; }
+.hl-swatch.hl-blue   { background: #7abaf5; }
+.hl-swatch.hl-pink   { background: #f7a0c8; }
+
+.hl-swatch:hover { transform: scale(1.12); }
+
+.hl-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+.hl-act {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.hl-act:hover { background: var(--accent-soft); }
+
+/* ---------- 批注编辑弹层 ---------- */
+
+.note-popover {
+  position: fixed;
+  z-index: 75;
+  width: 320px;
+  max-width: 88vw;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+}
+
+.note-popover[hidden] { display: none; }
+
+.note-quote {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  border-left: 2px solid var(--border);
+  padding: 2px 0 2px 8px;
+  margin-bottom: 9px;
+  max-height: 76px;
+  overflow-y: auto;
+}
+
+#note-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+#note-input:focus { outline: none; border-color: var(--accent); }
+
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 9px;
+}
+
+.note-actions .btn { padding: 6px 12px; font-size: 13px; }
+.note-actions .link-btn:last-child { margin-left: auto; }
+
+/* ---------- 笔记面板 ---------- */
+
+.notes-panel {
+  position: absolute;
+  top: 54px;
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  max-width: 88vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.notes-panel[hidden] { display: none; }
+
+.panel-title { flex: 1; font-size: 14px; font-weight: 500; }
+
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.notes-list:empty { display: none; }
+
+.note-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.note-item:hover { background: var(--accent-soft); }
+
+.note-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.note-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.note-dot.hl-yellow { background: #ffe06a; }
+.note-dot.hl-green  { background: #7ed982; }
+.note-dot.hl-blue   { background: #7abaf5; }
+.note-dot.hl-pink   { background: #f7a0c8; }
+
+.note-item-head .note-index { margin-left: auto; }
+
+.note-item-quote {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.note-item-note {
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--accent);
+}
+
 /* ---------- 提示条 ---------- */
 
 .toast {

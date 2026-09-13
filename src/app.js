@@ -13,6 +13,9 @@
   var Parser = window.MingScribe.Parser;
   var Progress = window.MingScribe.Progress;
   var Search = window.MingScribe.Search;
+  var Decorate = window.MingScribe.Decorate;
+  var Annotations = window.MingScribe.Annotations;
+  var Exporter = window.MingScribe.Exporter;
   var BookStore = window.MingScribe.BookStore;
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
@@ -42,6 +45,7 @@
 
   var storage = safeStorage();
   var store = Progress.createStore(storage);
+  var annotationStore = Annotations.createStore(storage);
   var bookCache = null;
   var cacheBackend = '';
 
@@ -54,7 +58,10 @@
     pendingKey: '',
     search: { query: '', results: [], index: -1 },
     searchTimer: null,
-    dragging: false
+    dragging: false,
+    annotations: [],
+    selection: null,
+    editingId: ''
   };
 
   var el = {};
@@ -295,8 +302,9 @@
     if (action === 'remove') {
       if (bookCache) bookCache.remove(key).catch(function () {});
       store.remove(key);
+      annotationStore.removeByBook(key);
       renderShelf();
-      toast('已删除该书及其阅读记录');
+      toast('已删除该书及其阅读记录与划线');
       return;
     }
 
@@ -431,6 +439,7 @@
   function openBook(book, meta) {
     state.book = book;
     state.meta = meta;
+    state.annotations = annotationStore.list(meta.key);
 
     var saved = store.get(meta.key);
     var target = saved
@@ -451,16 +460,19 @@
 
   function enterReader() {
     resetSearch();
+    closeNotesPanel();
     el.shelfScreen.hidden = true;
     el.readerScreen.hidden = false;
     el.readerBookName.textContent = bookTitleOf(state.meta);
     el.toc.hidden = true;
     buildToc();
+    renderNotesPanel();
   }
 
   function backToShelf() {
     flushSave();
     resetSearch();
+    closeNotesPanel();
     el.readerScreen.hidden = true;
     el.shelfScreen.hidden = false;
     el.toc.hidden = true;
@@ -553,8 +565,8 @@
     el.content.scrollTop = 0;
     positionAt(Math.max(0, Math.min(Number(charOffset) || 0, chapter.end - chapter.start)));
 
-    // 搜索进行中时，翻章也要保留高亮，否则跳章后关键词就找不着了
-    if (state.search.query) applyHighlights();
+    // 统一重画：搜索命中与划线都要保留，否则翻章后关键词和划线就丢了
+    decorateChapter();
 
     updateProgressDisplay();
     scheduleSave();
@@ -670,6 +682,8 @@
     if (!state.book) return;
     el.searchPanel.hidden = false;
     el.toc.hidden = true;
+    closeNotesPanel();
+    hideToolbar();
     el.searchInput.focus();
     el.searchInput.select();
   }
@@ -695,7 +709,7 @@
       state.search.results = [];
       el.searchCount.textContent = '输入关键词，在整本书里搜索。';
       el.searchResults.innerHTML = '';
-      clearHighlights();
+      decorateChapter();
       return;
     }
 
@@ -713,7 +727,7 @@
     renderSearchResults();
 
     if (!result.results.length) {
-      clearHighlights();
+      decorateChapter();
       return;
     }
 
@@ -771,7 +785,7 @@
     state.search.index = i;
 
     renderChapter(hit.chapterIndex, hit.offset);
-    applyHighlights();
+    decorateChapter();
     markCurrentHit(hit.offset);
     markResultActive(i);
   }
@@ -781,29 +795,42 @@
     gotoResult(state.search.index + delta);
   }
 
-  /** 给当前章节里所有关键词打高亮。重复执行不会叠加（先读 textContent 再重写）。 */
-  function applyHighlights() {
+  /** 当前章节的全部搜索命中区间（章节内坐标）。 */
+  function chapterHits() {
     var query = state.search.query;
-    if (!query) return;
-
-    var nodes = el.content.querySelectorAll('[data-off]');
-    for (var i = 0; i < nodes.length; i++) {
-      var text = nodes[i].textContent;
-      var ranges = Search.highlightRanges(text, query);
-      if (ranges.length) nodes[i].innerHTML = Search.renderHighlightedHtml(text, ranges);
-    }
+    if (!query || !state.book) return [];
+    var chapter = state.book.chapters[state.chapterIndex];
+    return chapter ? Search.highlightRanges(chapter.text, query) : [];
   }
 
-  function clearHighlights() {
+  /** 当前章节的全部标注。 */
+  function chapterDecorations() {
+    return state.annotations.filter(function (a) {
+      return a.chapterIndex === state.chapterIndex;
+    });
+  }
+
+  /**
+   * 重画当前章节正文：划线（外层）与搜索命中（内层）一起处理。
+   * 幂等 —— 每次都先读 textContent 再重写，反复调用不会层层叠加标签。
+   */
+  function decorateChapter() {
+    if (!state.book || !el.content) return;
+
+    var hits = chapterHits();
+    var decorations = chapterDecorations();
     var nodes = el.content.querySelectorAll('[data-off]');
+
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].querySelector('mark')) nodes[i].textContent = nodes[i].textContent;
+      var base = Number(nodes[i].getAttribute('data-off'));
+      var text = nodes[i].textContent;
+      nodes[i].innerHTML = Decorate.renderDecoratedHtml(text, base, decorations, hits);
     }
   }
 
   /** 把「当前这一处」的高亮标成更显眼的颜色，方便在长章节里一眼找到。 */
   function markCurrentHit(offset) {
-    var marks = el.content.querySelectorAll('mark');
+    var marks = el.content.querySelectorAll('mark.hit');
     for (var i = 0; i < marks.length; i++) marks[i].classList.remove('current');
 
     var nodes = el.content.querySelectorAll('[data-off]');
@@ -828,7 +855,9 @@
       var len = node.nodeValue.length;
       if (local >= acc && local < acc + len) {
         var parent = node.parentElement;
-        if (parent && parent.tagName === 'MARK') parent.classList.add('current');
+        if (parent && parent.tagName === 'MARK' && parent.classList.contains('hit')) {
+          parent.classList.add('current');
+        }
         return;
       }
       acc += len;
@@ -844,7 +873,336 @@
     el.searchInput.value = '';
     el.searchResults.innerHTML = '';
     el.searchCount.textContent = '输入关键词，在整本书里搜索。';
+    hideToolbar();
+    closeNoteEditor();
     closeSearchPanel();
+  }
+
+  /* ---------------- 划线 · 批注 ---------------- */
+
+  function colorLabel(color) {
+    return Exporter.colorLabel(color);
+  }
+
+  function chapterTitleOf(index) {
+    var chapter = state.book && state.book.chapters[index];
+    return chapter ? chapter.title : '';
+  }
+
+  /** 从选区里的任意节点向上找到它所在的段落（带 data-off 的元素）。 */
+  function paragraphOf(node) {
+    var element = node && node.nodeType === 1 ? node : (node && node.parentElement);
+    if (!element || !element.closest) return null;
+    return element.closest('[data-off]');
+  }
+
+  /** 段落内某个文本节点位置对应的偏移（段落局部坐标）。 */
+  function offsetInParagraph(paragraph, node, offsetInNode) {
+    var walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT, null);
+    var acc = 0;
+    var current;
+    while ((current = walker.nextNode())) {
+      if (current === node) return acc + offsetInNode;
+      acc += current.nodeValue.length;
+    }
+    return acc;
+  }
+
+  /**
+   * 把浏览器选区翻译成「章节内起止偏移」——与进度、标注共用的坐标系。
+   * 支持跨段落选择：起点取起始段落、终点取结束段落。
+   */
+  function currentSelection() {
+    var selection = window.getSelection ? window.getSelection() : null;
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+
+    var range = selection.getRangeAt(0);
+    if (!el.content.contains(range.startContainer) || !el.content.contains(range.endContainer)) return null;
+
+    var startParagraph = paragraphOf(range.startContainer);
+    var endParagraph = paragraphOf(range.endContainer);
+    if (!startParagraph || !endParagraph) return null;
+
+    var start = Number(startParagraph.getAttribute('data-off')) +
+      offsetInParagraph(startParagraph, range.startContainer, range.startOffset);
+    var end = Number(endParagraph.getAttribute('data-off')) +
+      offsetInParagraph(endParagraph, range.endContainer, range.endOffset);
+
+    if (!isFinite(start) || !isFinite(end) || end <= start) return null;
+
+    return {
+      chapterIndex: state.chapterIndex,
+      start: start,
+      end: end,
+      // 跨段落时会有换行，统一压成空格，导出到 Markdown 才不会断行
+      text: selection.toString().replace(/\s+/g, ' ').trim(),
+      rect: range.getBoundingClientRect()
+    };
+  }
+
+  function clearSelection() {
+    var selection = window.getSelection ? window.getSelection() : null;
+    if (selection && selection.removeAllRanges) selection.removeAllRanges();
+  }
+
+  function showToolbar(rect) {
+    el.hlToolbar.hidden = false;
+    var width = el.hlToolbar.offsetWidth || 240;
+    var height = el.hlToolbar.offsetHeight || 34;
+
+    var left = rect.left + rect.width / 2 - width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+
+    var top = rect.top - height - 8;
+    if (top < 8) top = rect.bottom + 8;
+
+    el.hlToolbar.style.left = Math.round(left) + 'px';
+    el.hlToolbar.style.top = Math.round(top) + 'px';
+  }
+
+  function hideToolbar() {
+    el.hlToolbar.hidden = true;
+    state.selection = null;
+  }
+
+  /** 选区变化后刷新工具条：有有效选区就显示，否则收起。 */
+  function refreshSelection() {
+    if (el.readerScreen.hidden || !state.book) return;
+
+    var selection = currentSelection();
+    state.selection = selection;
+
+    if (!selection || selection.text.length < 1) {
+      hideToolbar();
+      return;
+    }
+    showToolbar(selection.rect);
+  }
+
+  function createAnnotation(color, openEditor) {
+    var selection = state.selection || currentSelection();
+    if (!selection || !state.meta) return;
+
+    var result = annotationStore.add({
+      bookKey: state.meta.key,
+      chapterIndex: selection.chapterIndex,
+      start: selection.start,
+      end: selection.end,
+      text: selection.text,
+      color: color
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'overlap') toast('这段和已有划线重叠了，先把那条删掉');
+      else if (result.reason === 'storage') toast('保存失败：浏览器存储空间不足');
+      else toast('划线失败：选区无效');
+      return;
+    }
+
+    state.annotations = annotationStore.list(state.meta.key);
+    decorateChapter();
+    renderNotesPanel();
+    hideToolbar();
+    clearSelection();
+
+    if (openEditor) openNoteEditor(result.record, selection.rect);
+    else toast('已划线 · ' + colorLabel(color) + '（右侧「笔记」可查看）');
+  }
+
+  function closeNoteEditor() {
+    el.notePopover.hidden = true;
+    state.editingId = '';
+  }
+
+  function openNoteEditor(record, rect) {
+    if (!record) return;
+    state.editingId = record.id;
+    el.noteQuote.textContent = record.text || '（未记录原文）';
+    el.noteInput.value = record.note || '';
+    el.notePopover.hidden = false;
+    positionNoteEditor(rect);
+    el.noteInput.focus();
+  }
+
+  function positionNoteEditor(rect) {
+    var width = el.notePopover.offsetWidth || 320;
+    var height = el.notePopover.offsetHeight || 190;
+
+    var anchor = rect || {
+      left: window.innerWidth / 2 - 40,
+      right: window.innerWidth / 2 + 40,
+      top: window.innerHeight / 3,
+      bottom: window.innerHeight / 3 + 20,
+      width: 80
+    };
+
+    var left = anchor.left + anchor.width / 2 - width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+
+    var top = anchor.bottom + 10;
+    if (top + height > window.innerHeight - 8) top = Math.max(8, anchor.top - height - 10);
+
+    el.notePopover.style.left = Math.round(left) + 'px';
+    el.notePopover.style.top = Math.round(top) + 'px';
+  }
+
+  function saveNote() {
+    if (!state.editingId) return;
+
+    var result = annotationStore.updateNote(state.editingId, el.noteInput.value);
+    if (!result.ok) {
+      toast(result.reason === 'storage' ? '保存失败：浏览器存储空间不足' : '这条划线已不存在');
+      return;
+    }
+
+    state.annotations = annotationStore.list(state.meta.key);
+    decorateChapter();
+    renderNotesPanel();
+    closeNoteEditor();
+    toast(result.record.note ? '批注已保存' : '已清空批注');
+  }
+
+  function deleteEditingAnnotation() {
+    if (!state.editingId) return;
+
+    if (!annotationStore.remove(state.editingId)) {
+      toast('删除失败：这条划线已不存在');
+      return;
+    }
+
+    state.annotations = annotationStore.list(state.meta.key);
+    decorateChapter();
+    renderNotesPanel();
+    closeNoteEditor();
+    toast('已删除这条划线');
+  }
+
+  function cycleEditingColor() {
+    var record = annotationStore.get(state.editingId);
+    if (!record) return;
+
+    var next = Annotations.COLORS[(Annotations.COLORS.indexOf(record.color) + 1) % Annotations.COLORS.length];
+    var result = annotationStore.updateColor(state.editingId, next);
+    if (!result.ok) { toast('换颜色失败'); return; }
+
+    state.annotations = annotationStore.list(state.meta.key);
+    decorateChapter();
+    renderNotesPanel();
+    toast('已换成' + colorLabel(next));
+  }
+
+  function openNotesPanel() {
+    if (!state.book) return;
+    el.notesPanel.hidden = false;
+    el.toc.hidden = true;
+    closeSearchPanel();
+    hideToolbar();
+    renderNotesPanel();
+  }
+
+  function closeNotesPanel() {
+    el.notesPanel.hidden = true;
+  }
+
+  function notesPanelOpen() {
+    return !el.notesPanel.hidden;
+  }
+
+  function renderNotesPanel() {
+    var list = state.annotations;
+
+    el.notesCount.textContent = String(list.length);
+    el.notesHint.textContent = list.length
+      ? '按顺序列出，点一条即可跳到正文位置。'
+      : '在正文里选中一段文字，就会出现划线按钮。';
+
+    el.notesList.innerHTML = '';
+    if (!list.length) return;
+
+    var frag = document.createDocumentFragment();
+
+    list.forEach(function (item, i) {
+      var li = document.createElement('li');
+      li.className = 'note-item';
+      li.setAttribute('data-id', item.id);
+
+      var head = document.createElement('div');
+      head.className = 'note-item-head';
+
+      var dot = document.createElement('span');
+      dot.className = 'note-dot hl-' + item.color;
+
+      var chapter = document.createElement('span');
+      chapter.className = 'note-item-chapter';
+      chapter.textContent = chapterTitleOf(item.chapterIndex) || ('第 ' + (item.chapterIndex + 1) + ' 节');
+
+      var order = document.createElement('span');
+      order.className = 'note-index';
+      order.textContent = '#' + (i + 1);
+
+      head.appendChild(dot);
+      head.appendChild(chapter);
+      head.appendChild(order);
+
+      var quote = document.createElement('div');
+      quote.className = 'note-item-quote';
+      quote.textContent = item.text || '（未记录原文）';
+
+      li.appendChild(head);
+      li.appendChild(quote);
+
+      if (item.note) {
+        var note = document.createElement('div');
+        note.className = 'note-item-note';
+        note.textContent = item.note;
+        li.appendChild(note);
+      }
+
+      frag.appendChild(li);
+    });
+
+    el.notesList.appendChild(frag);
+  }
+
+  function jumpToAnnotation(id) {
+    var record = annotationStore.get(id);
+    if (!record || !state.book) return;
+
+    renderChapter(record.chapterIndex, record.start);
+
+    var node = el.content.querySelector('mark.hl[data-id="' + record.id + '"]');
+    if (node) {
+      node.classList.add('flash');
+      setTimeout(function () { node.classList.remove('flash'); }, 1200);
+    }
+  }
+
+  function exportMarkdown() {
+    if (!state.book || !state.meta) return;
+
+    if (!state.annotations.length) {
+      toast('还没有划线，先在正文里选一段文字');
+      return;
+    }
+
+    var markdown = Exporter.toMarkdown(state.book, state.annotations, {
+      now: Date.now(),
+      sourceName: state.meta.name
+    });
+
+    var fileName = Exporter.sanitizeFileName(state.meta.title || state.meta.name) + '-笔记.md';
+    var blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+
+    toast('已导出 ' + state.annotations.length + ' 条到「' + fileName + '」');
   }
 
   function scheduleSave() {
@@ -893,10 +1251,27 @@
   function onKeyDown(event) {
     if (el.readerScreen.hidden || !state.book) return;
 
+    // 焦点在输入框 / 文本域里时，一律不接管按键。
+    // 否则在搜索框里按左右键会顺手翻章，在批注框里打空格会翻页。
+    var target = event.target;
+    var tag = target && target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        (target && target.isContentEditable)) {
+      return;
+    }
+
     // Ctrl/Cmd + F 打开搜索（覆盖浏览器自带查找，否则会跟本页搜索抢焦点）
     if ((event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F')) {
       event.preventDefault();
       openSearchPanel();
+      return;
+    }
+
+    // Ctrl/Cmd + M 打开笔记面板
+    if ((event.ctrlKey || event.metaKey) && (event.key === 'm' || event.key === 'M')) {
+      event.preventDefault();
+      if (notesPanelOpen()) closeNotesPanel();
+      else openNotesPanel();
       return;
     }
 
@@ -939,8 +1314,11 @@
         el.content.scrollTop = el.content.scrollHeight;
         break;
       case 'Escape':
-        // 先关搜索面板，再关目录：一次 Esc 只关一层
-        if (searchPanelOpen()) closeSearchPanel();
+        // 一次 Esc 只关一层：批注弹层 → 划线工具条 → 搜索面板 → 笔记面板 → 目录
+        if (!el.notePopover.hidden) closeNoteEditor();
+        else if (!el.hlToolbar.hidden) { hideToolbar(); clearSelection(); }
+        else if (searchPanelOpen()) closeSearchPanel();
+        else if (notesPanelOpen()) closeNotesPanel();
         else el.toc.hidden = true;
         return;
       default:
@@ -967,8 +1345,9 @@
     el.clearAll.addEventListener('click', function () {
       if (bookCache) bookCache.clear().catch(function () {});
       store.clear();
+      annotationStore.clear();
       renderShelf();
-      toast('已清空全部书籍与阅读记录');
+      toast('已清空全部书籍、阅读记录与划线');
     });
 
     el.backBtn.addEventListener('click', backToShelf);
@@ -977,7 +1356,11 @@
 
     el.tocBtn.addEventListener('click', function () {
       el.toc.hidden = !el.toc.hidden;
-      if (!el.toc.hidden) closeSearchPanel();
+      if (!el.toc.hidden) {
+        closeSearchPanel();
+        closeNotesPanel();
+        hideToolbar();
+      }
     });
     el.tocCloseBtn.addEventListener('click', function () { el.toc.hidden = true; });
 
@@ -998,6 +1381,7 @@
     });
 
     el.content.addEventListener('scroll', function () {
+      hideToolbar();
       updateProgressDisplay();
       scheduleSave();
     });
@@ -1068,6 +1452,74 @@
       gotoResult(Number(li.getAttribute('data-i')));
     });
 
+    /* 划线工具条 */
+    // 按下时阻止默认行为，否则点按钮的瞬间选区就没了
+    el.hlToolbar.addEventListener('mousedown', function (event) { event.preventDefault(); });
+
+    el.hlToolbar.addEventListener('click', function (event) {
+      var swatch = event.target.closest ? event.target.closest('.hl-swatch') : null;
+      if (swatch) {
+        createAnnotation(swatch.getAttribute('data-color'), false);
+      }
+    });
+
+    el.hlAddNoteBtn.addEventListener('click', function () { createAnnotation('yellow', true); });
+    el.hlCancelBtn.addEventListener('click', function () { hideToolbar(); clearSelection(); });
+
+    document.addEventListener('mouseup', function (event) {
+      if (el.readerScreen.hidden) return;
+      if (el.hlToolbar.contains(event.target)) return;
+      // 等浏览器把选区更新完再读，否则拿到的是上一轮的选区
+      setTimeout(refreshSelection, 0);
+    });
+
+    document.addEventListener('keyup', function (event) {
+      if (el.readerScreen.hidden) return;
+      if (event.key === 'Shift' || event.key.indexOf('Arrow') === 0) setTimeout(refreshSelection, 0);
+    });
+
+    /* 点击已有划线 → 打开批注编辑 */
+    el.content.addEventListener('click', function (event) {
+      var mark = event.target.closest ? event.target.closest('mark.hl') : null;
+      if (!mark) return;
+
+      var record = annotationStore.get(mark.getAttribute('data-id'));
+      if (!record) return;
+
+      hideToolbar();
+      openNoteEditor(record, mark.getBoundingClientRect());
+    });
+
+    /* 批注编辑弹层 */
+    el.noteSaveBtn.addEventListener('click', saveNote);
+    el.noteDeleteBtn.addEventListener('click', deleteEditingAnnotation);
+    el.noteColorBtn.addEventListener('click', cycleEditingColor);
+    el.noteCloseBtn.addEventListener('click', closeNoteEditor);
+
+    el.noteInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        saveNote();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeNoteEditor();
+      }
+    });
+
+    /* 笔记面板 */
+    el.notesBtn.addEventListener('click', function () {
+      if (notesPanelOpen()) closeNotesPanel();
+      else openNotesPanel();
+    });
+    el.notesCloseBtn.addEventListener('click', closeNotesPanel);
+    el.exportBtn.addEventListener('click', exportMarkdown);
+
+    el.notesList.addEventListener('click', function (event) {
+      var li = event.target.closest ? event.target.closest('.note-item') : null;
+      if (!li) return;
+      jumpToAnnotation(li.getAttribute('data-id'));
+    });
+
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('beforeunload', flushSave);
     document.addEventListener('visibilitychange', function () {
@@ -1111,6 +1563,26 @@
     el.searchPrevBtn = $('btn-search-prev');
     el.searchNextBtn = $('btn-search-next');
     el.searchCloseBtn = $('btn-search-close');
+
+    el.notesBtn = $('btn-notes');
+    el.notesPanel = $('notes-panel');
+    el.notesCount = $('notes-count');
+    el.notesHint = $('notes-hint');
+    el.notesList = $('notes-list');
+    el.exportBtn = $('btn-export');
+    el.notesCloseBtn = $('btn-notes-close');
+
+    el.hlToolbar = $('hl-toolbar');
+    el.hlAddNoteBtn = $('hl-add-note');
+    el.hlCancelBtn = $('hl-cancel');
+
+    el.notePopover = $('note-popover');
+    el.noteQuote = $('note-quote');
+    el.noteInput = $('note-input');
+    el.noteSaveBtn = $('note-save');
+    el.noteColorBtn = $('note-color');
+    el.noteDeleteBtn = $('note-delete');
+    el.noteCloseBtn = $('note-close');
 
     el.toast = $('toast');
   }
