@@ -290,6 +290,9 @@
       name: input.name || '未命名',
       size: Number(input.size) || 0,
       source: source,
+      // EPUB 需要额外记住章节边界，才能在没拿到原文件时从缓存的正文重建目录
+      format: input.format || 'txt',
+      toc: Array.isArray(input.toc) ? input.toc : null,
       chapters: Number(input.chapters) || 0,
       chars: Number(input.chars) || 0,
       addedAt: now,

@@ -14,10 +14,10 @@
     <p class="sub">极简电子书阅读器 · MVP</p>
   </header>
 
-  <button id="btn-open-file" class="btn btn-primary btn-block" type="button">选择 TXT 文件</button>
-  <input id="file-input" type="file" accept=".txt,text/plain" hidden />
+  <button id="btn-open-file" class="btn btn-primary btn-block" type="button">选择 TXT / EPUB 文件</button>
+  <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip" hidden />
   <p class="hint">
-    自动识别 UTF-8 / GB18030 编码，中文小说不会乱码。<br />
+    支持 TXT（自动识别 UTF-8 / GB18030 编码）与 EPUB 电子书。<br />
     首次选择后会自动记住这本书，下次在书架上点一下直接继续阅读。<br />
     文件仅在你的浏览器本地读取，不会上传到任何服务器。
   </p>
@@ -27,7 +27,7 @@
     <button id="clear-all" class="link-btn" type="button">清空书架</button>
   </div>
   <ul id="shelf-list" class="shelf-list"></ul>
-  <p id="shelf-empty" class="empty">书架还是空的。选一个 TXT 文件开始吧。</p>
+  <p id="shelf-empty" class="empty">书架还是空的。选一个 TXT 或 EPUB 文件开始吧。</p>
 </section>
 
 <section id="reader-screen" class="screen reader" hidden>
@@ -118,6 +118,7 @@
 
 <script src="src/encoding.js"></script>
 <script src="src/parser.js"></script>
+<script src="src/epub.js"></script>
 <script src="src/progress.js"></script>
 <script src="src/search.js"></script>
 <script src="src/decorate.js"></script>

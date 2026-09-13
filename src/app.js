@@ -11,6 +11,7 @@
 
   var Encoding = window.MingScribe.Encoding;
   var Parser = window.MingScribe.Parser;
+  var Epub = window.MingScribe.Epub;
   var Progress = window.MingScribe.Progress;
   var Search = window.MingScribe.Search;
   var Decorate = window.MingScribe.Decorate;
@@ -153,6 +154,16 @@
           reject(err);
         }
       };
+      reader.onerror = function () { reject(reader.error || new Error('读取文件失败')); };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  /** 读取文件的原始字节（EPUB 是 ZIP 包，必须按二进制读）。 */
+  function readFileToBuffer(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
       reader.onerror = function () { reject(reader.error || new Error('读取文件失败')); };
       reader.readAsArrayBuffer(file);
     });
@@ -350,12 +361,30 @@
             return;
           }
           entry.handle.getFile().then(function (file) {
-            readFileToText(file).then(
-              function (text) { ingest(text, meta, entry.handle); },
-              function () { askForFile(key, meta.name); }
-            );
+            if (Epub.isEpubName(file.name)) {
+              readFileToBuffer(file).then(
+                function (buffer) { ingestEpub(buffer, meta, entry.handle); },
+                function () { askForFile(key, meta.name); }
+              );
+            } else {
+              readFileToText(file).then(
+                function (text) { ingest(text, meta, entry.handle); },
+                function () { askForFile(key, meta.name); }
+              );
+            }
           }, function () { askForFile(key, meta.name); });
         });
+        return;
+      }
+
+      // EPUB：缓存里存了正文与章节边界，直接重建，不再需要原文件
+      if (entry.meta.format === 'epub') {
+        var rebuilt = Epub.rebuildFromCache(entry.text, entry.meta.toc, entry.meta.title);
+        if (rebuilt) {
+          openBook(rebuilt, meta);
+          return;
+        }
+        askForFile(key, meta.name);
         return;
       }
 
@@ -371,7 +400,9 @@
   function pickFile() {
     if (BookStore.supportsFileSystemAccess()) {
       window.showOpenFilePicker({
-        types: [{ description: '文本文件', accept: { 'text/plain': ['.txt', '.text'] } }],
+        types: [
+          { description: '电子书（TXT / EPUB）', accept: { 'text/plain': ['.txt', '.text'], 'application/epub+zip': ['.epub'] } }
+        ],
         multiple: false
       }).then(function (handles) {
         var handle = handles && handles[0];
@@ -396,13 +427,24 @@
     if (!file) return;
     toast('正在打开《' + file.name.replace(/\.[^.]+$/, '') + '》…', true);
 
+    var meta = {
+      key: BookStore.makeKey(file.name, file.size),
+      name: file.name,
+      size: file.size,
+      title: file.name.replace(/\.[^.]+$/, '')
+    };
+
+    // EPUB 是 ZIP 包，必须按二进制读取后交给 EPUB 解析层
+    if (Epub.isEpubName(file.name)) {
+      readFileToBuffer(file).then(function (buffer) {
+        ingestEpub(buffer, meta, handle || null);
+      }, function () {
+        toast('读取文件失败');
+      });
+      return;
+    }
+
     readFileToText(file).then(function (text) {
-      var meta = {
-        key: BookStore.makeKey(file.name, file.size),
-        name: file.name,
-        size: file.size,
-        title: file.name.replace(/\.[^.]+$/, '')
-      };
       ingest(text, meta, handle || null);
     }, function () {
       toast('读取文件失败');
@@ -434,6 +476,38 @@
     } catch (err) {
       toast('打开失败：' + (err && err.message ? err.message : '未知错误'));
     }
+  }
+
+  /** EPUB：解析 → 缓存（正文 + 章节边界）→ 进入阅读。 */
+  function ingestEpub(buffer, meta, handle) {
+    Epub.parseEpub(buffer).then(function (book) {
+      if (!book.totalChars) {
+        toast('这本 EPUB 里没有可读的文字');
+        return;
+      }
+
+      // 书名优先用 EPUB 元数据（<dc:title>），文件名只作兜底
+      if (book.title) meta.title = book.title;
+
+      cacheBook({
+        key: meta.key,
+        title: meta.title,
+        name: meta.name,
+        size: meta.size,
+        chapters: book.chapters.length,
+        chars: book.totalChars,
+        format: 'epub',
+        toc: book.chapters.map(function (c) {
+          return { title: c.title, start: c.start, end: c.end };
+        }),
+        text: book.text,
+        handle: handle || null
+      });
+
+      openBook(book, meta);
+    }, function (err) {
+      toast('EPUB 打开失败：' + (err && err.message ? err.message : '未知错误'));
+    });
   }
 
   function openBook(book, meta) {
@@ -1518,6 +1592,26 @@
       var li = event.target.closest ? event.target.closest('.note-item') : null;
       if (!li) return;
       jumpToAnnotation(li.getAttribute('data-id'));
+    });
+
+    /* 点击面板外部自动关闭：目录 / 搜索 / 笔记 / 批注弹层。
+       触发按钮本身不算「外部」——否则按钮的 mousedown 先关面板、click 再把它打开，等于永远关不掉。 */
+    document.addEventListener('mousedown', function (event) {
+      if (el.readerScreen.hidden) return;
+      var target = event.target;
+
+      if (!el.notePopover.hidden && !el.notePopover.contains(target)) {
+        closeNoteEditor();
+      }
+      if (!el.toc.hidden && !el.toc.contains(target) && !el.tocBtn.contains(target)) {
+        el.toc.hidden = true;
+      }
+      if (searchPanelOpen() && !el.searchPanel.contains(target) && !el.searchBtn.contains(target)) {
+        closeSearchPanel();
+      }
+      if (notesPanelOpen() && !el.notesPanel.contains(target) && !el.notesBtn.contains(target)) {
+        closeNotesPanel();
+      }
     });
 
     document.addEventListener('keydown', onKeyDown);

@@ -9,6 +9,7 @@
  */
 const fs = require('fs');
 const { chromium } = require('C:\\Users\\Admin\\.workbuddy\\binaries\\node\\workspace\\node_modules\\playwright-core');
+const { buildSampleEpub } = require('../tests/fixtures/make_epub.js');
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PAGE_URL = 'file:///D:/MingScribe/index.html';
@@ -318,6 +319,116 @@ function sizeOf(p) {
   log('12. 书架条目（验证缓存与进度写入）：');
   if (!shelf.length) log('   （空）');
   shelf.forEach(function (i) { log('   · ' + i.name + '  →  ' + i.meta); });
+
+  /* ---- EPUB 支持 ---- */
+  log('');
+  const EPUB_FILE = 'D:\\MingScribe\\tools\\_sample.epub';
+  fs.writeFileSync(EPUB_FILE, buildSampleEpub());
+  const t3 = Date.now();
+  await page.setInputFiles('#file-input', EPUB_FILE);
+  await page.waitForFunction(
+    () => document.querySelectorAll('#reader-content [data-off]').length > 0,
+    null,
+    { timeout: 60000 }
+  );
+  const epubInfo = await page.evaluate(() => ({
+    book: document.getElementById('reader-book-name').textContent,
+    chapter: document.getElementById('reader-chapter-name').textContent,
+    imgNote: !!document.querySelector('#reader-content .img-note')
+  }));
+  await page.click('#btn-toc');
+  await page.waitForTimeout(150);
+  const epubTocCount = await page.locator('#toc-list li').count();
+  await page.click('#toc-list li:nth-child(2)');
+  await page.waitForTimeout(250);
+  const imgNote = await page.evaluate(() => !!document.querySelector('#reader-content .img-note'));
+  log('13. 打开 EPUB（' + (Date.now() - t3) + ' ms）：书名=' + epubInfo.book + '　首章=' + epubInfo.chapter);
+  log('    目录条数=' + epubTocCount + '　跳第 2 章后=' +
+    (await page.locator('#reader-chapter-name').textContent()) + '　图片占位样式=' + imgNote);
+
+  // EPUB 里搜索
+  await page.click('#btn-search');
+  await page.fill('#search-input', '正文');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#search-results .search-item').length > 0,
+    null,
+    { timeout: 10000 }
+  );
+  const epubSearch = await page.evaluate(() => document.getElementById('search-count').textContent);
+  await page.press('#search-input', 'Escape');
+  await page.waitForTimeout(200);
+  log('    EPUB 内搜索「正文」：' + epubSearch);
+
+  /* ---- 点面板外部自动关闭 ---- */
+  log('');
+  await page.click('#btn-toc');
+  await page.waitForTimeout(120);
+  const tocWasOpen = await page.locator('#toc').isVisible();
+  await page.mouse.click(620, 520);
+  await page.waitForTimeout(150);
+  const tocClosedByOutside = !(await page.locator('#toc').isVisible());
+
+  await page.click('#btn-search');
+  await page.waitForTimeout(120);
+  await page.mouse.click(620, 520);
+  await page.waitForTimeout(150);
+  const searchClosedByOutside = !(await page.locator('#search-panel').isVisible());
+
+  await page.click('#btn-notes');
+  await page.waitForTimeout(120);
+  await page.mouse.click(620, 520);
+  await page.waitForTimeout(150);
+  const notesClosedByOutside = !(await page.locator('#notes-panel').isVisible());
+
+  log('14. 点面板外部自动关闭：目录 ' + (tocWasOpen && tocClosedByOutside ? 'OK' : 'FAIL') +
+    '　搜索 ' + (searchClosedByOutside ? 'OK' : 'FAIL') +
+    '　笔记 ' + (notesClosedByOutside ? 'OK' : 'FAIL'));
+
+  // 批注弹层同样点外部关闭
+  await page.evaluate(() => {
+    const p = document.querySelector('#reader-content [data-off]');
+    if (!p || !p.firstChild || p.firstChild.nodeType !== 3) return;
+    const node = p.firstChild;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, Math.min(8, node.nodeValue.length));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.getElementById('reader-content')
+      .dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  await page.click('.hl-swatch.hl-blue');
+  await page.waitForTimeout(250);
+  await page.click('#reader-content mark.hl');
+  await page.waitForTimeout(200);
+  const popWasOpen = await page.locator('#note-popover').isVisible();
+  await page.click('#reader-status');
+  await page.waitForTimeout(150);
+  const popClosedByOutside = !(await page.locator('#note-popover').isVisible());
+  log('    批注弹层打开=' + popWasOpen + '　点外部后关闭=' + popClosedByOutside);
+
+  /* ---- 刷新后从缓存重建 EPUB（无句柄路径） ---- */
+  log('');
+  await page.reload();
+  await page.waitForSelector('#shelf-screen:not([hidden])');
+  await page.click('#shelf-list .shelf-item button[data-action="open"]');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#reader-content [data-off]').length > 0,
+    null,
+    { timeout: 60000 }
+  );
+  await page.waitForTimeout(300);
+  const epubCached = await page.evaluate(() => ({
+    book: document.getElementById('reader-book-name').textContent,
+    chapter: document.getElementById('reader-chapter-name').textContent,
+    toc: document.getElementById('toc-list').children.length,
+    marks: document.querySelectorAll('#reader-content mark.hl').length
+  }));
+  log('15. 刷新后从缓存直接打开 EPUB（rebuildFromCache 路径）：');
+  log('    书名=' + epubCached.book + '　恢复到章=' + epubCached.chapter +
+    '　目录条数=' + epubCached.toc + '　划线仍在=' + epubCached.marks);
 
   log('');
   log('页面错误：' + (errors.length ? errors.join(' | ') : '无'));
