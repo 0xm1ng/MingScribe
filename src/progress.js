@@ -54,6 +54,48 @@
     return { chapterIndex: idx, charOffset: clampOffset(charOffset, span) };
   }
 
+  /**
+   * 「章节序号 + 章节内偏移」→ 全书绝对偏移。
+   * 进度条按全书比例定位时需要它。
+   */
+  function globalOffsetOf(book, chapterIndex, charOffset) {
+    var pos = resolvePosition(book, chapterIndex, charOffset);
+    return book.chapters[pos.chapterIndex].start + pos.charOffset;
+  }
+
+  /**
+   * 全书绝对偏移 → 「章节序号 + 章节内偏移」。
+   * 二分查找，百万字级别的书也不会有性能问题。
+   */
+  function resolveGlobalOffset(book, globalOffset) {
+    if (!book || !book.chapters || !book.chapters.length) {
+      return { chapterIndex: 0, charOffset: 0 };
+    }
+
+    var g = toInt(globalOffset, 0);
+    if (g < 0) g = 0;
+
+    var chapters = book.chapters;
+    var lo = 0;
+    var hi = chapters.length - 1;
+    var found = 0;
+
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (chapters[mid].start <= g) {
+        found = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+
+    var chapter = chapters[found];
+    var span = Math.max(0, chapter.end - chapter.start);
+    var offset = g - chapter.start;
+    return { chapterIndex: found, charOffset: clampOffset(offset, span) };
+  }
+
   /** 已读百分比（0 ~ 100，保留两位小数）。 */
   function computePercent(book, chapterIndex, charOffset) {
     if (!book || !book.chapters || !book.chapters.length) return 0;
@@ -153,6 +195,8 @@
     bookKey: bookKey,
     computePercent: computePercent,
     resolvePosition: resolvePosition,
+    globalOffsetOf: globalOffsetOf,
+    resolveGlobalOffset: resolveGlobalOffset,
     makeRecord: makeRecord,
     createStore: createStore
   };

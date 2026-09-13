@@ -98,6 +98,8 @@ test('同时提供句柄与正文时优先使用句柄', async () => {
 test('list 只返回摘要，且按更新时间倒序', async () => {
   const store = BookStore.createStore(BookStore.createMemoryBackend());
   await store.put({ key: 'a::1', name: 'a.txt', title: 'A', size: 1, text: '一'.repeat(100) });
+  // 两次写入若落在同一毫秒，排序结果会不确定，这里显式错开时间
+  await new Promise((resolve) => setTimeout(resolve, 2));
   await store.put({ key: 'b::2', name: 'b.txt', title: 'B', size: 2, text: '二'.repeat(100) });
 
   const list = await store.list();

@@ -12,12 +12,15 @@
   var Encoding = window.MingScribe.Encoding;
   var Parser = window.MingScribe.Parser;
   var Progress = window.MingScribe.Progress;
+  var Search = window.MingScribe.Search;
   var BookStore = window.MingScribe.BookStore;
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
   var PREFS_KEY = 'mingscribe.prefs.v1';
   var SAVE_DEBOUNCE_MS = 400;
+  var SEARCH_DEBOUNCE_MS = 180;
+  var READING_CPM = 350; // 阅读速度估算（字/分钟），仅用于给出「大约还要读多久」
   var IMAGE_NOTE_PATTERN = /^\[(图片|图)[:：]/;
 
   /** localStorage 不可用（隐私模式等）时退回内存实现，保证功能不中断。 */
@@ -48,7 +51,10 @@
     chapterIndex: 0,
     saveTimer: null,
     toastTimer: null,
-    pendingKey: ''
+    pendingKey: '',
+    search: { query: '', results: [], index: -1 },
+    searchTimer: null,
+    dragging: false
   };
 
   var el = {};
@@ -444,6 +450,7 @@
   }
 
   function enterReader() {
+    resetSearch();
     el.shelfScreen.hidden = true;
     el.readerScreen.hidden = false;
     el.readerBookName.textContent = bookTitleOf(state.meta);
@@ -453,6 +460,7 @@
 
   function backToShelf() {
     flushSave();
+    resetSearch();
     el.readerScreen.hidden = true;
     el.shelfScreen.hidden = false;
     el.toc.hidden = true;
@@ -503,6 +511,10 @@
       var trimmed = line.trim();
       if (!trimmed) continue;
 
+      // data-off 记的是「去掉行首空白后的正文起点」，
+      // 这样搜索命中的偏移能精确落到段落里的同一个字
+      var lead = line.length - line.replace(/^\s+/, '').length;
+
       var node;
       if (trimmed === chapter.title) {
         node = document.createElement('h2');
@@ -514,7 +526,7 @@
         node = document.createElement('p');
       }
 
-      node.setAttribute('data-off', String(lineStart));
+      node.setAttribute('data-off', String(lineStart + lead));
       node.textContent = trimmed;
       frag.appendChild(node);
     }
@@ -540,6 +552,9 @@
 
     el.content.scrollTop = 0;
     positionAt(Math.max(0, Math.min(Number(charOffset) || 0, chapter.end - chapter.start)));
+
+    // 搜索进行中时，翻章也要保留高亮，否则跳章后关键词就找不着了
+    if (state.search.query) applyHighlights();
 
     updateProgressDisplay();
     scheduleSave();
@@ -572,11 +587,264 @@
     return best;
   }
 
+  function setProgressVisual(pct) {
+    var shown = Math.max(0, Math.min(100, Number(pct) || 0));
+    el.progressFill.style.width = shown + '%';
+    el.progressKnob.style.left = shown + '%';
+    el.progressText.textContent = shown.toFixed(1) + '%';
+    el.progressBar.setAttribute('aria-valuenow', shown.toFixed(1));
+  }
+
+  /** 把字数换算成「大约还要读多久」。只是估算，不追求精确。 */
+  function formatDuration(chars) {
+    var minutes = Math.round((Number(chars) || 0) / READING_CPM);
+    if (minutes < 1) return '不到 1 分钟';
+    if (minutes < 60) return minutes + ' 分钟';
+    var hours = Math.floor(minutes / 60);
+    var rest = minutes % 60;
+    return rest ? hours + ' 小时 ' + rest + ' 分' : hours + ' 小时';
+  }
+
+  function updateStatus() {
+    if (!state.book) return;
+    var chapter = state.book.chapters[state.chapterIndex];
+    if (!chapter) return;
+
+    var span = Math.max(0, chapter.end - chapter.start);
+    var read = Math.min(currentOffset(), span);
+    var remainChapter = Math.max(0, span - read);
+    var remainTotal = Math.max(0, state.book.totalChars - (chapter.start + read));
+
+    el.readerStatus.textContent =
+      '本章剩余 ' + formatNumber(remainChapter) + ' 字 · 约 ' + formatDuration(remainChapter) +
+      '　｜　全书剩余 ' + formatNumber(remainTotal) + ' 字 · 约 ' + formatDuration(remainTotal);
+  }
+
   function updateProgressDisplay() {
     if (!state.book) return;
     var pct = Progress.computePercent(state.book, state.chapterIndex, currentOffset());
-    el.progressFill.style.width = pct + '%';
-    el.progressText.textContent = pct.toFixed(1) + '%';
+    setProgressVisual(pct);
+    updateStatus();
+  }
+
+  /* ---------------- 进度条拖动跳转 ---------------- */
+
+  function ratioFromPointer(event) {
+    var rect = el.progressBar.getBoundingClientRect();
+    if (!rect.width) return 0;
+    return Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  }
+
+  function globalOffsetAtRatio(ratio) {
+    var total = state.book ? state.book.totalChars || 0 : 0;
+    return Math.round(ratio * Math.max(0, total - 1));
+  }
+
+  /** 拖动过程中只更新视觉与「松手会跳到哪一章」，不真正切章。 */
+  function previewSeek(ratio) {
+    if (!state.book) return;
+    setProgressVisual(ratio * 100);
+    var pos = Progress.resolveGlobalOffset(state.book, globalOffsetAtRatio(ratio));
+    var chapter = state.book.chapters[pos.chapterIndex];
+    el.readerStatus.textContent = '松手跳到：' + ((chapter && chapter.title) || ('第 ' + (pos.chapterIndex + 1) + ' 节'));
+  }
+
+  function commitSeek(ratio) {
+    if (!state.book) return;
+    var pos = Progress.resolveGlobalOffset(state.book, globalOffsetAtRatio(ratio));
+    renderChapter(pos.chapterIndex, pos.charOffset);
+  }
+
+  function seekByChars(deltaChars) {
+    if (!state.book) return;
+    var total = state.book.totalChars || 1;
+    var current = Progress.globalOffsetOf(state.book, state.chapterIndex, currentOffset());
+    var next = Math.max(0, Math.min(total - 1, current + deltaChars));
+    var pos = Progress.resolveGlobalOffset(state.book, next);
+    renderChapter(pos.chapterIndex, pos.charOffset);
+  }
+
+  /* ---------------- 全文搜索 ---------------- */
+
+  function openSearchPanel() {
+    if (!state.book) return;
+    el.searchPanel.hidden = false;
+    el.toc.hidden = true;
+    el.searchInput.focus();
+    el.searchInput.select();
+  }
+
+  function closeSearchPanel() {
+    el.searchPanel.hidden = true;
+    if (state.searchTimer) {
+      clearTimeout(state.searchTimer);
+      state.searchTimer = null;
+    }
+  }
+
+  function searchPanelOpen() {
+    return !el.searchPanel.hidden;
+  }
+
+  function runSearch(raw) {
+    var query = String(raw == null ? '' : raw).trim();
+    state.search.query = query;
+    state.search.index = -1;
+
+    if (!query) {
+      state.search.results = [];
+      el.searchCount.textContent = '输入关键词，在整本书里搜索。';
+      el.searchResults.innerHTML = '';
+      clearHighlights();
+      return;
+    }
+
+    if (!state.book) return;
+
+    var result = Search.searchBook(state.book, query);
+    state.search.results = result.results;
+
+    el.searchCount.textContent = result.total
+      ? (result.truncated
+          ? '找到 ' + result.total + ' 处以上，已截断——换个更具体的词会更准'
+          : '找到 ' + result.total + ' 处')
+      : '没有找到「' + query + '」';
+
+    renderSearchResults();
+
+    if (!result.results.length) {
+      clearHighlights();
+      return;
+    }
+
+    // 从当前阅读位置往后找第一条，避免每次搜索都被拽回开头
+    var start = Search.firstIndexFrom(
+      result.results,
+      Progress.globalOffsetOf(state.book, state.chapterIndex, currentOffset())
+    );
+    gotoResult(start < 0 ? 0 : start);
+  }
+
+  function renderSearchResults() {
+    el.searchResults.innerHTML = '';
+    var frag = document.createDocumentFragment();
+
+    state.search.results.forEach(function (r, i) {
+      var li = document.createElement('li');
+      li.className = 'search-item';
+      li.setAttribute('data-i', String(i));
+
+      var caption = document.createElement('div');
+      caption.className = 'search-item-chapter';
+      caption.textContent = r.chapterTitle;
+
+      var snippet = document.createElement('div');
+      snippet.className = 'search-item-snippet';
+      snippet.innerHTML = Search.renderHighlightedHtml(r.snippet, [[r.hitStart, r.hitEnd]]);
+
+      li.appendChild(caption);
+      li.appendChild(snippet);
+      frag.appendChild(li);
+    });
+
+    el.searchResults.appendChild(frag);
+  }
+
+  function markResultActive(index) {
+    var items = el.searchResults.querySelectorAll('.search-item');
+    for (var i = 0; i < items.length; i++) {
+      if (i === index) {
+        items[i].classList.add('active');
+        if (items[i].scrollIntoView) items[i].scrollIntoView({ block: 'nearest' });
+      } else {
+        items[i].classList.remove('active');
+      }
+    }
+  }
+
+  function gotoResult(index) {
+    var results = state.search.results;
+    if (!results || !results.length) return;
+
+    var i = ((index % results.length) + results.length) % results.length;
+    var hit = results[i];
+    state.search.index = i;
+
+    renderChapter(hit.chapterIndex, hit.offset);
+    applyHighlights();
+    markCurrentHit(hit.offset);
+    markResultActive(i);
+  }
+
+  function stepResult(delta) {
+    if (!state.search.results.length) return;
+    gotoResult(state.search.index + delta);
+  }
+
+  /** 给当前章节里所有关键词打高亮。重复执行不会叠加（先读 textContent 再重写）。 */
+  function applyHighlights() {
+    var query = state.search.query;
+    if (!query) return;
+
+    var nodes = el.content.querySelectorAll('[data-off]');
+    for (var i = 0; i < nodes.length; i++) {
+      var text = nodes[i].textContent;
+      var ranges = Search.highlightRanges(text, query);
+      if (ranges.length) nodes[i].innerHTML = Search.renderHighlightedHtml(text, ranges);
+    }
+  }
+
+  function clearHighlights() {
+    var nodes = el.content.querySelectorAll('[data-off]');
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].querySelector('mark')) nodes[i].textContent = nodes[i].textContent;
+    }
+  }
+
+  /** 把「当前这一处」的高亮标成更显眼的颜色，方便在长章节里一眼找到。 */
+  function markCurrentHit(offset) {
+    var marks = el.content.querySelectorAll('mark');
+    for (var i = 0; i < marks.length; i++) marks[i].classList.remove('current');
+
+    var nodes = el.content.querySelectorAll('[data-off]');
+    var target = null;
+    var local = 0;
+
+    for (var j = 0; j < nodes.length; j++) {
+      var start = Number(nodes[j].getAttribute('data-off'));
+      var length = nodes[j].textContent.length;
+      if (start <= offset && offset < start + length) {
+        target = nodes[j];
+        local = offset - start;
+        break;
+      }
+    }
+    if (!target) return;
+
+    var walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+    var acc = 0;
+    var node;
+    while ((node = walker.nextNode())) {
+      var len = node.nodeValue.length;
+      if (local >= acc && local < acc + len) {
+        var parent = node.parentElement;
+        if (parent && parent.tagName === 'MARK') parent.classList.add('current');
+        return;
+      }
+      acc += len;
+    }
+  }
+
+  function resetSearch() {
+    state.search = { query: '', results: [], index: -1 };
+    if (state.searchTimer) {
+      clearTimeout(state.searchTimer);
+      state.searchTimer = null;
+    }
+    el.searchInput.value = '';
+    el.searchResults.innerHTML = '';
+    el.searchCount.textContent = '输入关键词，在整本书里搜索。';
+    closeSearchPanel();
   }
 
   function scheduleSave() {
@@ -612,7 +880,10 @@
     var anchor = currentOffset();
     applyFontSize(next);
     if (state.book) {
-      requestAnimationFrame(function () { positionAt(anchor); });
+      requestAnimationFrame(function () {
+        positionAt(anchor);
+        updateProgressDisplay();
+      });
     }
     toast('字号 ' + next + 'px');
   }
@@ -621,6 +892,29 @@
 
   function onKeyDown(event) {
     if (el.readerScreen.hidden || !state.book) return;
+
+    // Ctrl/Cmd + F 打开搜索（覆盖浏览器自带查找，否则会跟本页搜索抢焦点）
+    if ((event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F')) {
+      event.preventDefault();
+      openSearchPanel();
+      return;
+    }
+
+    // 进度条获得焦点时，左右键做精细跳转而不是翻章
+    if (event.target === el.progressBar) {
+      var span = Math.max(1, Math.round((state.book.totalChars || 1) * 0.01));
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        seekByChars(event.key === 'ArrowLeft' ? -span : span);
+        return;
+      }
+      if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        var pos = Progress.resolveGlobalOffset(state.book, event.key === 'Home' ? 0 : (state.book.totalChars || 1) - 1);
+        renderChapter(pos.chapterIndex, pos.charOffset);
+        return;
+      }
+    }
 
     var viewport = el.content.clientHeight;
 
@@ -645,7 +939,9 @@
         el.content.scrollTop = el.content.scrollHeight;
         break;
       case 'Escape':
-        el.toc.hidden = true;
+        // 先关搜索面板，再关目录：一次 Esc 只关一层
+        if (searchPanelOpen()) closeSearchPanel();
+        else el.toc.hidden = true;
         return;
       default:
         return;
@@ -679,7 +975,10 @@
     el.prevBtn.addEventListener('click', function () { goChapter(-1); });
     el.nextBtn.addEventListener('click', function () { goChapter(1); });
 
-    el.tocBtn.addEventListener('click', function () { el.toc.hidden = !el.toc.hidden; });
+    el.tocBtn.addEventListener('click', function () {
+      el.toc.hidden = !el.toc.hidden;
+      if (!el.toc.hidden) closeSearchPanel();
+    });
     el.tocCloseBtn.addEventListener('click', function () { el.toc.hidden = true; });
 
     el.tocList.addEventListener('click', function (event) {
@@ -701,6 +1000,72 @@
     el.content.addEventListener('scroll', function () {
       updateProgressDisplay();
       scheduleSave();
+    });
+
+    /* 进度条：按下拖动预览，松手跳转 */
+    el.progressBar.addEventListener('pointerdown', function (event) {
+      if (!state.book) return;
+      state.dragging = true;
+      el.progressBar.classList.add('dragging');
+      if (el.progressBar.setPointerCapture) {
+        try { el.progressBar.setPointerCapture(event.pointerId); } catch (err) { /* 忽略 */ }
+      }
+      previewSeek(ratioFromPointer(event));
+      event.preventDefault();
+    });
+
+    el.progressBar.addEventListener('pointermove', function (event) {
+      if (!state.dragging) return;
+      previewSeek(ratioFromPointer(event));
+    });
+
+    function endDrag(event) {
+      if (!state.dragging) return;
+      state.dragging = false;
+      el.progressBar.classList.remove('dragging');
+      if (el.progressBar.releasePointerCapture && event && event.pointerId != null) {
+        try { el.progressBar.releasePointerCapture(event.pointerId); } catch (err) { /* 忽略 */ }
+      }
+      commitSeek(ratioFromPointer(event));
+    }
+
+    el.progressBar.addEventListener('pointerup', endDrag);
+    el.progressBar.addEventListener('pointercancel', endDrag);
+
+    /* 搜索 */
+    el.searchBtn.addEventListener('click', function () {
+      if (searchPanelOpen()) closeSearchPanel();
+      else openSearchPanel();
+    });
+    el.searchCloseBtn.addEventListener('click', function () {
+      closeSearchPanel();
+      el.content.focus();
+    });
+
+    el.searchInput.addEventListener('input', function () {
+      if (state.searchTimer) clearTimeout(state.searchTimer);
+      var value = el.searchInput.value;
+      state.searchTimer = setTimeout(function () { runSearch(value); }, SEARCH_DEBOUNCE_MS);
+    });
+
+    el.searchInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        stepResult(event.shiftKey ? -1 : 1);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeSearchPanel();
+        el.content.focus();
+      }
+    });
+
+    el.searchPrevBtn.addEventListener('click', function () { stepResult(-1); });
+    el.searchNextBtn.addEventListener('click', function () { stepResult(1); });
+
+    el.searchResults.addEventListener('click', function (event) {
+      var li = event.target.closest ? event.target.closest('.search-item') : null;
+      if (!li) return;
+      gotoResult(Number(li.getAttribute('data-i')));
     });
 
     document.addEventListener('keydown', onKeyDown);
@@ -732,8 +1097,21 @@
     el.fontUpBtn = $('btn-font-up');
     el.fontDownBtn = $('btn-font-down');
     el.themeBtn = $('btn-theme');
+    el.progressBar = $('progress-bar');
     el.progressFill = $('progress-fill');
+    el.progressKnob = $('progress-knob');
     el.progressText = $('progress-text');
+    el.readerStatus = $('reader-status');
+
+    el.searchBtn = $('btn-search');
+    el.searchPanel = $('search-panel');
+    el.searchInput = $('search-input');
+    el.searchCount = $('search-count');
+    el.searchResults = $('search-results');
+    el.searchPrevBtn = $('btn-search-prev');
+    el.searchNextBtn = $('btn-search-next');
+    el.searchCloseBtn = $('btn-search-close');
+
     el.toast = $('toast');
   }
 

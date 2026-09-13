@@ -356,13 +356,31 @@ body {
 .progress-wrap {
   flex: 1;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 3px;
   min-width: 0;
 }
 
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .progress-bar {
+  position: relative;
   flex: 1;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.progress-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.progress-track {
+  width: 100%;
   height: 4px;
   border-radius: 2px;
   background: var(--border);
@@ -376,7 +394,148 @@ body {
   transition: width 0.25s;
 }
 
-.progress-wrap .muted { font-size: 12px; }
+/* 拖动时关掉过渡，否则拖柄会追不上手指 */
+.progress-bar.dragging .progress-fill { transition: none; }
+
+.progress-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.progress-bar:hover .progress-knob,
+.progress-bar.dragging .progress-knob,
+.progress-bar:focus-visible .progress-knob { opacity: 1; }
+
+.progress-row .muted {
+  font-size: 12px;
+  min-width: 44px;
+  text-align: right;
+}
+
+.foot-status {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 搜索面板 ---------- */
+
+.search-panel {
+  position: absolute;
+  top: 54px;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  max-width: 86vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.search-panel[hidden],
+.search-results:empty { display: none; }
+
+.side-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+#search-input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+#search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.side-count {
+  margin: 0;
+  padding: 9px 14px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.search-item {
+  padding: 9px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.search-item:hover { background: var(--accent-soft); }
+
+.search-item.active {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.search-item-chapter {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-item-snippet {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  word-break: break-all;
+}
+
+/* ---------- 搜索高亮 ---------- */
+
+mark {
+  background: rgba(255, 202, 74, 0.5);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+body[data-theme="dark"] mark { background: rgba(255, 202, 74, 0.26); }
+
+.reader-content mark.current {
+  background: #f0a020;
+  color: #1a1a1a;
+}
 
 /* ---------- 提示条 ---------- */
 

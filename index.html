@@ -38,6 +38,7 @@
       <span id="reader-chapter-name" class="muted"></span>
     </div>
     <button id="btn-toc" class="icon-btn" type="button" title="目录">目录</button>
+    <button id="btn-search" class="icon-btn" type="button" title="搜索正文（Ctrl+F）">搜索</button>
     <button id="btn-font-down" class="icon-btn" type="button" title="缩小字号">A−</button>
     <button id="btn-font-up" class="icon-btn" type="button" title="放大字号">A+</button>
     <button id="btn-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
@@ -51,13 +52,31 @@
     <ol id="toc-list" class="toc-list"></ol>
   </aside>
 
+  <aside id="search-panel" class="search-panel" hidden>
+    <div class="side-head">
+      <input id="search-input" type="search" placeholder="在全书搜索…" autocomplete="off" spellcheck="false" />
+      <button id="btn-search-prev" class="icon-btn" type="button" title="上一处（Shift+Enter）">↑</button>
+      <button id="btn-search-next" class="icon-btn" type="button" title="下一处（Enter）">↓</button>
+      <button id="btn-search-close" class="link-btn" type="button">关闭</button>
+    </div>
+    <p id="search-count" class="side-count muted">输入关键词，在整本书里搜索。</p>
+    <ol id="search-results" class="search-results"></ol>
+  </aside>
+
   <main id="reader-content" class="reader-content" tabindex="0"></main>
 
   <footer class="reader-foot">
     <button id="btn-prev" class="btn" type="button">上一章</button>
     <div class="progress-wrap">
-      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
-      <span id="progress-text" class="muted">0%</span>
+      <div class="progress-row">
+        <div id="progress-bar" class="progress-bar" role="slider" tabindex="0"
+             aria-label="全书进度，可拖动跳转" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+          <span id="progress-knob" class="progress-knob"></span>
+        </div>
+        <span id="progress-text" class="muted">0%</span>
+      </div>
+      <div id="reader-status" class="foot-status">&nbsp;</div>
     </div>
     <button id="btn-next" class="btn" type="button">下一章</button>
   </footer>
@@ -68,6 +87,7 @@
 <script src="src/encoding.js"></script>
 <script src="src/parser.js"></script>
 <script src="src/progress.js"></script>
+<script src="src/search.js"></script>
 <script src="src/bookstore.js"></script>
 <script src="src/app.js"></script>
 </body>

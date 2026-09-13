@@ -156,3 +156,57 @@ test('存储内容不是数组时同样容错', () => {
   const store = Progress.createStore(storage);
   assert.deepEqual(store.list(), []);
 });
+
+/* ---------- 全书绝对偏移（进度条拖动跳转依赖它） ---------- */
+
+test('globalOffsetOf 把章节内偏移换算成全书偏移', () => {
+  const book = fakeBook();
+  assert.equal(Progress.globalOffsetOf(book, 0, 0), 0);
+  assert.equal(Progress.globalOffsetOf(book, 0, 25), 25);
+  assert.equal(Progress.globalOffsetOf(book, 1, 0), 50);
+  assert.equal(Progress.globalOffsetOf(book, 1, 10), 60);
+  // 越界章节号先被夹到最后一章，再算偏移
+  assert.equal(Progress.globalOffsetOf(book, 9, 999), 100);
+  assert.equal(Progress.globalOffsetOf(book, -3, -3), 0);
+});
+
+test('resolveGlobalOffset 定位到正确的章节', () => {
+  const book = fakeBook();
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 0), { chapterIndex: 0, charOffset: 0 });
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 49), { chapterIndex: 0, charOffset: 49 });
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 50), { chapterIndex: 1, charOffset: 0 });
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 75), { chapterIndex: 1, charOffset: 25 });
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 100), { chapterIndex: 1, charOffset: 50 });
+});
+
+test('resolveGlobalOffset 处理越界与异常输入', () => {
+  const book = fakeBook();
+  assert.deepEqual(Progress.resolveGlobalOffset(book, -10), { chapterIndex: 0, charOffset: 0 });
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 99999), { chapterIndex: 1, charOffset: 50 });
+  assert.deepEqual(Progress.resolveGlobalOffset(book, 'abc'), { chapterIndex: 0, charOffset: 0 });
+  assert.deepEqual(Progress.resolveGlobalOffset(null, 10), { chapterIndex: 0, charOffset: 0 });
+  assert.deepEqual(Progress.resolveGlobalOffset({ chapters: [] }, 10), { chapterIndex: 0, charOffset: 0 });
+});
+
+test('两者往返一致：任意全书偏移都能还原回原位置', () => {
+  const book = fakeBook();
+  for (let g = 0; g <= 100; g++) {
+    const pos = Progress.resolveGlobalOffset(book, g);
+    assert.equal(Progress.globalOffsetOf(book, pos.chapterIndex, pos.charOffset), g, '偏移 ' + g + ' 往返不一致');
+  }
+});
+
+test('空章节不会让 resolveGlobalOffset 崩掉', () => {
+  // 章节长度为 0 是真实存在的（连续两个标题行之间无正文）
+  const book = {
+    title: '含空章',
+    text: 'ABC',
+    totalChars: 3,
+    chapters: [
+      { index: 0, title: '一', start: 0, end: 0, text: '' },
+      { index: 1, title: '二', start: 0, end: 3, text: 'ABC' }
+    ]
+  };
+  const pos = Progress.resolveGlobalOffset(book, 2);
+  assert.deepEqual(pos, { chapterIndex: 1, charOffset: 2 });
+});
