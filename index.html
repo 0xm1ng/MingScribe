@@ -14,19 +14,20 @@
     <p class="sub">极简电子书阅读器 · MVP</p>
   </header>
 
-  <label class="btn btn-primary btn-block" for="file-input">选择 TXT 文件</label>
-  <input id="file-input" type="file" accept=".txt,text/plain" />
+  <button id="btn-open-file" class="btn btn-primary btn-block" type="button">选择 TXT 文件</button>
+  <input id="file-input" type="file" accept=".txt,text/plain" hidden />
   <p class="hint">
     自动识别 UTF-8 / GB18030 编码，中文小说不会乱码。<br />
+    首次选择后会自动记住这本书，下次在书架上点一下直接继续阅读。<br />
     文件仅在你的浏览器本地读取，不会上传到任何服务器。
   </p>
 
   <div class="list-head">
-    <h2>最近阅读</h2>
-    <button id="clear-all" class="link-btn" type="button">清空记录</button>
+    <h2>我的书架</h2>
+    <button id="clear-all" class="link-btn" type="button">清空书架</button>
   </div>
   <ul id="shelf-list" class="shelf-list"></ul>
-  <p id="shelf-empty" class="empty">还没有阅读记录。选一个 TXT 文件开始吧。</p>
+  <p id="shelf-empty" class="empty">书架还是空的。选一个 TXT 文件开始吧。</p>
 </section>
 
 <section id="reader-screen" class="screen reader" hidden>
@@ -67,6 +68,7 @@
 <script src="src/encoding.js"></script>
 <script src="src/parser.js"></script>
 <script src="src/progress.js"></script>
+<script src="src/bookstore.js"></script>
 <script src="src/app.js"></script>
 </body>
 </html>

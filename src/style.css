@@ -318,6 +318,21 @@ body {
   text-indent: 2em;
 }
 
+/* TXT 无法承载图片，占位文字弱化处理，避免打断阅读节奏 */
+.reader-content p.img-note {
+  font-family: var(--font-sans);
+  font-size: calc(var(--reader-font-size) * 0.72);
+  line-height: 1.6;
+  color: var(--text-muted);
+  text-indent: 0;
+  text-align: left;
+  margin: 0 0 0.9em;
+  padding: 4px 10px;
+  border-left: 2px solid var(--border);
+  background: rgba(127, 127, 127, 0.06);
+  border-radius: 0 4px 4px 0;
+}
+
 .reader-foot {
   display: flex;
   align-items: center;
