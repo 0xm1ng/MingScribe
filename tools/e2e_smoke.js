@@ -50,7 +50,7 @@ function sizeOf(p) {
 
   /* ---- 大书：最关心的性能指标 ---- */
   log('');
-  log('2. 打开大书 Hello-CTF（' + sizeOf(BIG) + '，292 章 / 137 万字）');
+  log('2. 打开大书 Hello-CTF（' + sizeOf(BIG) + '，137 万字）');
   const t0 = Date.now();
   await page.setInputFiles('#file-input', BIG);
   await page.waitForFunction(
@@ -408,6 +408,19 @@ function sizeOf(p) {
   await page.waitForTimeout(150);
   const popClosedByOutside = !(await page.locator('#note-popover').isVisible());
   log('    批注弹层打开=' + popWasOpen + '　点外部后关闭=' + popClosedByOutside);
+
+  // 关闭时不能丢掉刚打的字：打一段文字后点外部，再打开应还在
+  await page.click('#reader-content mark.hl');
+  await page.waitForTimeout(200);
+  await page.fill('#note-input', '点外部也应自动保存');
+  await page.click('#reader-status');
+  await page.waitForTimeout(250);
+  await page.click('#reader-content mark.hl');
+  await page.waitForTimeout(200);
+  const autoSaved = await page.inputValue('#note-input');
+  log('    点外部关闭后自动保存批注：内容=「' + autoSaved + '」（期望「点外部也应自动保存」）');
+  await page.click('#reader-status');
+  await page.waitForTimeout(150);
 
   /* ---- 刷新后从缓存重建 EPUB（无句柄路径） ---- */
   log('');

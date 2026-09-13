@@ -1083,9 +1083,52 @@
     else toast('已划线 · ' + colorLabel(color) + '（右侧「笔记」可查看）');
   }
 
-  function closeNoteEditor() {
+  /** 只隐藏弹层，不碰输入框内容（供「保存」「删除」之后收尾使用）。 */
+  function hideNoteEditor() {
     el.notePopover.hidden = true;
     state.editingId = '';
+  }
+
+  /**
+   * 关闭批注弹层。若输入框内容有改动则先自动保存。
+   *
+   * 为什么要自动保存：点「关闭」和点面板外部都会走到这里，而用户刚打的字
+   * 如果被静默丢掉，是比多点一次按钮严重得多的问题。
+   */
+  function closeNoteEditor() {
+    if (el.notePopover.hidden) return;
+
+    var id = state.editingId;
+    var typed = el.noteInput.value;
+
+    if (id) {
+      var record = annotationStore.get(id);
+      // 只有真的改过才写，避免每次关闭都产生一次无意义的存储写入
+      if (record && String(record.note || '') !== typed) {
+        var result = annotationStore.updateNote(id, typed);
+        if (result.ok) {
+          state.annotations = annotationStore.list(state.meta.key);
+          refreshNoteMark(id, !!typed);
+          renderNotesPanel();
+        } else if (result.reason === 'storage') {
+          toast('批注未能保存：浏览器存储空间不足');
+        }
+      }
+    }
+
+    hideNoteEditor();
+  }
+
+  /**
+   * 只更新某条划线的「有批注」小标，不整章重渲染。
+   * 关闭弹层是由 mousedown 触发的，此刻重渲染会把用户正在拖选的内容清掉。
+   */
+  function refreshNoteMark(id, hasNote) {
+    var marks = el.content.querySelectorAll('mark.hl');
+    for (var i = 0; i < marks.length; i++) {
+      if (marks[i].getAttribute('data-id') !== id) continue;
+      marks[i].classList.toggle('with-note', hasNote);
+    }
   }
 
   function openNoteEditor(record, rect) {
@@ -1132,7 +1175,7 @@
     state.annotations = annotationStore.list(state.meta.key);
     decorateChapter();
     renderNotesPanel();
-    closeNoteEditor();
+    hideNoteEditor();
     toast(result.record.note ? '批注已保存' : '已清空批注');
   }
 
@@ -1147,7 +1190,7 @@
     state.annotations = annotationStore.list(state.meta.key);
     decorateChapter();
     renderNotesPanel();
-    closeNoteEditor();
+    hideNoteEditor();
     toast('已删除这条划线');
   }
 
