@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MingScribe · 电子书阅读器</title>
+<link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+
+<section id="shelf-screen" class="screen shelf">
+  <header class="shelf-head">
+    <h1>MingScribe</h1>
+    <p class="sub">极简电子书阅读器 · MVP</p>
+  </header>
+
+  <label class="btn btn-primary btn-block" for="file-input">选择 TXT 文件</label>
+  <input id="file-input" type="file" accept=".txt,text/plain" />
+  <p class="hint">
+    自动识别 UTF-8 / GB18030 编码，中文小说不会乱码。<br />
+    文件仅在你的浏览器本地读取，不会上传到任何服务器。
+  </p>
+
+  <div class="list-head">
+    <h2>最近阅读</h2>
+    <button id="clear-all" class="link-btn" type="button">清空记录</button>
+  </div>
+  <ul id="shelf-list" class="shelf-list"></ul>
+  <p id="shelf-empty" class="empty">还没有阅读记录。选一个 TXT 文件开始吧。</p>
+</section>
+
+<section id="reader-screen" class="screen reader" hidden>
+  <header class="reader-bar">
+    <button id="btn-back" class="icon-btn" type="button" title="返回书架">←</button>
+    <div class="reader-title">
+      <span id="reader-book-name">未命名</span>
+      <span id="reader-chapter-name" class="muted"></span>
+    </div>
+    <button id="btn-toc" class="icon-btn" type="button" title="目录">目录</button>
+    <button id="btn-font-down" class="icon-btn" type="button" title="缩小字号">A−</button>
+    <button id="btn-font-up" class="icon-btn" type="button" title="放大字号">A+</button>
+    <button id="btn-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
+  </header>
+
+  <aside id="toc" class="toc" hidden>
+    <div class="toc-head">
+      <span>目录</span>
+      <button id="btn-toc-close" class="link-btn" type="button">关闭</button>
+    </div>
+    <ol id="toc-list" class="toc-list"></ol>
+  </aside>
+
+  <main id="reader-content" class="reader-content" tabindex="0"></main>
+
+  <footer class="reader-foot">
+    <button id="btn-prev" class="btn" type="button">上一章</button>
+    <div class="progress-wrap">
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+      <span id="progress-text" class="muted">0%</span>
+    </div>
+    <button id="btn-next" class="btn" type="button">下一章</button>
+  </footer>
+</section>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="src/encoding.js"></script>
+<script src="src/parser.js"></script>
+<script src="src/progress.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
