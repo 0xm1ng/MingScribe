@@ -18,3 +18,6 @@ desktop.ini
 npm-debug.log*
 *.tmp
 *.bak
+
+# 端到端自检产生的产物（脚本本身要提交，产物不要）
+tools/_*
