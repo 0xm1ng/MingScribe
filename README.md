@@ -251,7 +251,7 @@ npm install
 npm run tauri:dev
 ```
 
-> 第一次 `npm install` 会下载 `@tauri-apps/cli` 与 `@tauri-apps/api`；第一次 `tauri dev` 会编译 Rust 侧，耗时几分钟。
+> 第一次 `npm install` 会下载 `@tauri-apps/cli` 与 `@tauri-apps/api`；第一次 `tauri dev` 会编译 Rust 侧，耗时几分钟。`tauri dev` 会自动启动 `tools/dev_server.js` 作为静态前端服务器（端口 5173），无需 Vite/Webpack。
 
 打包发布：
 
