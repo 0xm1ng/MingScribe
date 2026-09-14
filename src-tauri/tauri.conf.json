@@ -6,8 +6,8 @@
   "build": {
     "beforeDevCommand": "node tools/dev_server.js",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "",
-    "frontendDist": "../"
+    "beforeBuildCommand": "node tools/build_frontend.js",
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
