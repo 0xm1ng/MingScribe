@@ -257,3 +257,18 @@ test('ensurePermission 各种权限状态的处理', async () => {
 test('supportsFileSystemAccess 在无 window 环境下返回 false', () => {
   assert.strictEqual(BookStore.supportsFileSystemAccess(), false);
 });
+
+test('parserVersion 会被持久化，未提供时归零', async () => {
+  const store = BookStore.createStore(BookStore.createMemoryBackend());
+
+  await store.put({
+    key: 'epub-a::100', name: 'a.epub', size: 100,
+    format: 'epub', parserVersion: 2, text: '正文'
+  });
+  const withVersion = await store.get('epub-a::100');
+  assert.strictEqual(withVersion.meta.parserVersion, 2, '版本号需原样存入 meta');
+
+  await store.put({ key: 'txt-b::200', name: 'b.txt', size: 200, text: '正文' });
+  const withoutVersion = await store.get('txt-b::200');
+  assert.strictEqual(withoutVersion.meta.parserVersion, 0, '未提供时应为 0（早于版本号机制写入的旧缓存）');
+});

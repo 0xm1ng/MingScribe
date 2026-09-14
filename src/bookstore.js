@@ -293,6 +293,8 @@
       // EPUB 需要额外记住章节边界，才能在没拿到原文件时从缓存的正文重建目录
       format: input.format || 'txt',
       toc: Array.isArray(input.toc) ? input.toc : null,
+      // 解析逻辑版本号：解析策略变更后，旧缓存正文可能不正确，据此判定是否需要重解析
+      parserVersion: Number(input.parserVersion) || 0,
       chapters: Number(input.chapters) || 0,
       chars: Number(input.chars) || 0,
       addedAt: now,

@@ -505,6 +505,12 @@
 
       // EPUB：缓存里存了正文与章节边界，直接重建，不再需要原文件
       if (entry.meta.format === 'epub') {
+        // 解析逻辑升级过（如编码探测策略变化）时，旧缓存里的正文可能不正确，
+        // 必须重新解析原文件，不能继续用缓存
+        if (entry.meta.parserVersion !== PARSER_VERSION) {
+          askForFile(key, meta.name);
+          return;
+        }
         var rebuilt = Epub.rebuildFromCache(entry.text, entry.meta.toc, entry.meta.title);
         if (rebuilt) {
           openBook(rebuilt, meta);
@@ -629,6 +635,7 @@
         chapters: book.chapters.length,
         chars: book.totalChars,
         format: 'epub',
+        parserVersion: PARSER_VERSION,
         toc: book.chapters.map(function (c) {
           return { title: c.title, start: c.start, end: c.end };
         }),
@@ -641,6 +648,9 @@
       toast('EPUB 打开失败：' + (err && err.message ? err.message : '未知错误'));
     });
   }
+
+  /** 解析逻辑版本号。改动解析结果（如编码探测策略）时必须 +1，让旧缓存失效。 */
+  var PARSER_VERSION = 2;
 
   /** 取桌面版注入的转换后端；网页版未注入则返回 null（此时不应触发转换）。 */
   function getConvertBackend() {
