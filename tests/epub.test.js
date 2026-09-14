@@ -12,7 +12,7 @@ const zlib = require('node:zlib');
 const Epub = require('../src/epub.js');
 const Progress = require('../src/progress.js');
 const Search = require('../src/search.js');
-const { buildSampleEpub, buildBrokenEpub, CHAPTERS, BOOK_TITLE } = require('./fixtures/make_epub.js');
+const { buildSampleEpub, buildBrokenEpub, buildZip, CHAPTERS, BOOK_TITLE } = require('./fixtures/make_epub.js');
 
 /** Node 环境：把 inflateRawSync 包装成模块期望的注入形式。 */
 const inflate = (u8) => Promise.resolve(new Uint8Array(zlib.inflateRawSync(Buffer.from(u8))));
@@ -175,4 +175,54 @@ test('decodeEntities 覆盖常用分支', () => {
 test('xhtmlToText：br 产生换行、注释被移除', () => {
   const text = Epub.xhtmlToText('<body><p>甲<!-- 注释 -->乙</p><p>丙<br/>丁</p></body>');
   assert.deepEqual(text.split('\n'), ['甲乙', '丙', '丁']);
+});
+
+test('GBK 编码的章节按声明解码，中文不乱码', async () => {
+  // Node 的 Buffer 不原生支持 GBK，所以手动拼出关键中文的 GBK 字节
+  const GBK = {
+    '第': [0xB5, 0xDA], '一': [0xD2, 0xBB], '章': [0xD5, 0xC2],
+    '中': [0xD6, 0xD0], '文': [0xCE, 0xC4], '标': [0xB1, 0xEA], '题': [0xCC, 0xE2],
+    '这': [0xD5, 0xE2], '是': [0xCA, 0xC7], '编': [0xB1, 0xE0], '码': [0xC2, 0xEB],
+    '的': [0xB5, 0xC4], '正': [0xD5, 0xFD], '。': [0xA1, 0xA3], ' ': [0x20]
+  };
+  function gbkBytes(str) {
+    const out = [];
+    for (const ch of str) {
+      if (GBK[ch]) out.push(...GBK[ch]);
+      else {
+        const b = Buffer.from(ch, 'latin1');
+        for (let i = 0; i < b.length; i++) out.push(b[i]);
+      }
+    }
+    return Buffer.from(out);
+  }
+  const title = gbkBytes('第一章 中文标题');
+  const body = gbkBytes('这是 GBK 编码的中文正文。');
+  const head = Buffer.from('<?xml version="1.0" encoding="gbk"?>\n' +
+    '<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="gbk"/></head><body>' +
+    '<h1>', 'latin1');
+  const mid = Buffer.from('</h1><p>', 'latin1');
+  const tail = Buffer.from('</p></body></html>', 'latin1');
+  const html = Buffer.concat([head, title, mid, body, tail]);
+
+  const opf = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <dc:title>GBK 编码测试</dc:title>
+</metadata>
+<manifest>
+  <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+</manifest>
+<spine><itemref idref="c1"/></spine>
+</package>`;
+
+  const buf = buildZip([
+    { name: 'mimetype', data: 'application/epub+zip', store: true },
+    { name: 'META-INF/container.xml', data: '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>', store: true },
+    { name: 'OEBPS/content.opf', data: opf },
+    { name: 'OEBPS/chapter1.xhtml', data: html, store: true }
+  ]);
+  const book = await parse(buf);
+  assert.ok(book.chapters[0].text.includes('中文正文'), 'GBK 编码的章节内容应被正确解码');
+  assert.ok(book.chapters[0].title.includes('中文标题'), 'GBK 编码的章节标题应被正确解码');
 });

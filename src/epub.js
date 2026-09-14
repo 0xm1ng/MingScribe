@@ -78,7 +78,7 @@
       var extraLen = u16(b, p + 30);
       var commentLen = u16(b, p + 32);
       var localOffset = u32(b, p + 42);
-      var name = utf8Decode(b.subarray(p + 46, p + 46 + nameLen));
+      var name = decodeBytes(b.subarray(p + 46, p + 46 + nameLen), 'utf-8');
       entries[name] = { method: method, compSize: compSize, localOffset: localOffset };
       p += 46 + nameLen + extraLen + commentLen;
     }
@@ -138,18 +138,53 @@
     return Promise.reject(new Error('不支持的压缩方式：' + entry.method));
   };
 
-  /** 读取一个文本文件。 */
+  /** 读取一个文本文件，自动检测 XML/HTML 声明的编码。 */
   ZipReader.prototype.readText = function (name) {
     return this.read(name).then(function (bytes) {
-      return bytes == null ? null : utf8Decode(bytes);
+      if (bytes == null) return null;
+      var encoding = detectEncoding(bytes);
+      return decodeBytes(bytes, encoding);
     });
   };
 
-  function utf8Decode(bytes) {
-    if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes);
+  function detectEncoding(bytes) {
+    // 先用 UTF-8 读前 4KB 找声明，避免大文件浪费
+    var probe = decodeBytes(bytes, 'utf-8', 4096);
+    var xml = /^\s*<\?xml\s[^>]*encoding\s*=\s*["']([^"']+)["'][^?]*\?>/i.exec(probe);
+    if (xml) return normalizeEncoding(xml[1]);
+    var meta1 = /<meta\s[^>]*charset\s*=\s*["']?([^"'>\s]+)["'\s>]/i.exec(probe);
+    if (meta1) return normalizeEncoding(meta1[1]);
+    var meta2 = /<meta\s[^>]*http-equiv\s*=\s*["']?content-type["']?[^>]*content\s*=\s*["'][^"]*charset\s*=\s*([^"';\s]+)["']/i.exec(probe);
+    if (meta2) return normalizeEncoding(meta2[1]);
+    return 'utf-8';
+  }
+
+  function normalizeEncoding(name) {
+    var n = String(name).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    var map = {
+      utf8: 'utf-8', utf88: 'utf-8',
+      gbk: 'gbk', gb18030: 'gb18030', gb2312: 'gbk',
+      big5: 'big5', big5hkscs: 'big5-hkscs',
+      shiftjis: 'shift_jis', shiftjs: 'shift_jis',
+      eucjp: 'euc-jp', euckr: 'euc-kr',
+      iso88591: 'iso-8859-1', windows1252: 'windows-1252', cp1252: 'windows-1252'
+    };
+    return map[n] || 'utf-8';
+  }
+
+  function decodeBytes(bytes, encoding, limit) {
+    var slice = bytes;
+    if (limit && bytes.length > limit) slice = bytes.subarray(0, limit);
+    if (typeof TextDecoder !== 'undefined') {
+      try {
+        return new TextDecoder(encoding, { fatal: false }).decode(slice);
+      } catch (err) {
+        return new TextDecoder('utf-8', { fatal: false }).decode(slice);
+      }
+    }
     // 极端环境兜底：按 Latin-1 读出（中文会乱码，但结构解析不受影响）
     var out = '';
-    for (var i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+    for (var i = 0; i < slice.length; i++) out += String.fromCharCode(slice[i]);
     return out;
   }
 
