@@ -256,6 +256,16 @@
     return Math.max(0, Math.min(Math.round(i), pages.length - 1));
   }
 
+  /**
+   * 把任意页序号对齐到「左页」（偶数），用于双页对开时保证两页成对出现。
+   * 例如 3 → 2、5 → 4、0 → 0；负数或非法输入回退到 0。
+   */
+  function pairStart(index) {
+    var i = Number(index) || 0;
+    if (i < 0) return 0;
+    return i - (i % 2);
+  }
+
   return {
     splitParagraphs: splitParagraphs,
     layoutParagraph: layoutParagraph,
@@ -264,6 +274,7 @@
     paginateChapter: paginateChapter,
     pageIndexOf: pageIndexOf,
     clampPageIndex: clampPageIndex,
+    pairStart: pairStart,
     BREAK_AFTER: BREAK_AFTER
   };
 });

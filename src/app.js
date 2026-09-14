@@ -75,6 +75,8 @@
     /** 分页模式下的当前页边界数组与页序号；滚动模式下不用。 */
     pages: [],
     pageIndex: 0,
+    /** 对开（双页）偏好：null = 跟随屏幕宽度自动，true/false = 用户手动锁定。 */
+    spreadUserPref: null,
     resizeTimer: null
   };
 
@@ -169,6 +171,60 @@
 
   function isPaged() {
     return readingMode() === MODE_PAGED;
+  }
+
+  /* ---------------- 对开（双页） ---------------- */
+
+  /** 容器宽度达到此值才把对开当作默认；低于则默认单页。 */
+  var SPREAD_MIN_CONTENT_PX = 720;
+  /** 双页中间的装订线占位（px），参与半屏容量估算。 */
+  var SPREAD_GUTTER = 32;
+  /** 半页可用宽度低于此值（px）则双页降级为单页渲染，避免字被压得过小。 */
+  var SPREAD_MIN_PAGE_PX = 300;
+  /** 双页下单页最大宽度（em），与 style.css 里 .page-frame 的 max-width 保持一致。 */
+  var SPREAD_MAX_PAGE_EM = 46;
+
+  /**
+   * 用户是否想要双页：
+   *   - spreadUserPref 为 null → 跟随屏幕宽度自动判断；
+   *   - 为 true / false → 用户手动锁定。
+   */
+  function baseSpread() {
+    if (state.spreadUserPref === null) {
+      return !!el.content && el.content.clientWidth >= SPREAD_MIN_CONTENT_PX;
+    }
+    return !!state.spreadUserPref;
+  }
+
+  /**
+   * 实际渲染时是否真的双页：即便用户选了双页，若半页被压得过小也降级单页，
+   * 否则字会小到没法看。渲染、翻页步长都看它，保证逻辑一致。
+   */
+  function effectiveSpread() {
+    if (!baseSpread()) return false;
+    var frameX = currentFrameX();
+    var avail = (el.content.clientWidth - SPREAD_GUTTER) / 2 - frameX;
+    return avail >= SPREAD_MIN_PAGE_PX;
+  }
+
+  /** 单个 .page-frame 左右内边距之和（px），没有现成 frame 时用默认 56。 */
+  function currentFrameX() {
+    var probe = el.content.querySelector('.page-frame');
+    if (probe) {
+      var pcs = window.getComputedStyle(probe);
+      return (parseFloat(pcs.paddingLeft) || 0) + (parseFloat(pcs.paddingRight) || 0);
+    }
+    return 56;
+  }
+
+  /** 单个 .page-frame 上下内边距之和（px），没有现成 frame 时用默认 90（34+56）。 */
+  function currentFrameY() {
+    var probe = el.content.querySelector('.page-frame');
+    if (probe) {
+      var pcs = window.getComputedStyle(probe);
+      return (parseFloat(pcs.paddingTop) || 0) + (parseFloat(pcs.paddingBottom) || 0);
+    }
+    return 90;
   }
 
   function applyTheme(theme) {
@@ -731,30 +787,28 @@
    */
   function idealMetrics() {
     var rect = el.content.getBoundingClientRect();
+    var frameX = currentFrameX();
+    var frameY = currentFrameY();
 
-    /*
-     * 关键：不能直接拿 el.content 的内边距来算。
-     * 分页模式下 padding 在 .page-frame 上（34px 28px 56px），而 .reader-content 是 0；
-     * 这里直接读 .page-frame 的真实盒模型，样式改了也不用跟着改这个函数。
-     */
-    var probe = el.content.querySelector('.page-frame');
-    var frameX = 28;
-    var frameY = 34 + 56;
-
-    if (probe) {
-      var pcs = window.getComputedStyle(probe);
-      frameX = (parseFloat(pcs.paddingLeft) || 0) + (parseFloat(pcs.paddingRight) || 0);
-      frameY = (parseFloat(pcs.paddingTop) || 0) + (parseFloat(pcs.paddingBottom) || 0);
+    // 分页模式下 padding 在 .page-frame 上，这里直接读它的真实盒模型，
+    // 样式改了也不用跟着改这个函数。
+    var perPageWidth;
+    if (effectiveSpread()) {
+      // 双页：一屏两个并排，每页宽度 = 半屏（扣掉装订线）再扣左右内边距，
+      // 上限锁定在 SPREAD_MAX_PAGE_EM，避免超宽屏把单页拉得过长。
+      var half = (rect.width - SPREAD_GUTTER) / 2;
+      if (half > SPREAD_MAX_PAGE_EM * DEFAULT_FONT_SIZE) half = SPREAD_MAX_PAGE_EM * DEFAULT_FONT_SIZE;
+      perPageWidth = Math.max(160, half - frameX);
+    } else {
+      perPageWidth = Math.max(160, rect.width - frameX);
     }
-
-    var width = Math.max(160, rect.width - frameX);
     var height = Math.max(120, rect.height - frameY);
 
     var fontSize = parseFloat(window.getComputedStyle(document.documentElement).getPropertyValue('--reader-font-size')) || DEFAULT_FONT_SIZE;
     var lineHeight = parseFloat(window.getComputedStyle(document.documentElement).getPropertyValue('--reader-line-height')) || DEFAULT_LINE_HEIGHT;
 
     return {
-      cols: Math.max(6, width / fontSize),
+      cols: Math.max(6, perPageWidth / fontSize),
       rowsPerPage: Math.max(3, height / (fontSize * lineHeight))
     };
   }
@@ -800,21 +854,17 @@
 
     state.pages = Paginate.paginateChapter(chapter, paginateOptions());
     state.pageIndex = Paginate.pageIndexOf(state.pages, offset);
+    if (effectiveSpread()) {
+      // 对开下让当前页成为「左页」（偶数），保证两页成对出现
+      state.pageIndex = Paginate.pairStart(state.pageIndex);
+    }
 
     renderPage();
   }
 
-  /** 只把当前页需要的那一段正文渲染出来。 */
-  function renderPage() {
-    if (!state.book) return;
+  /** 构造一个 .page-frame，把 [page.start, page.end) 这一段正文填进去。 */
+  function buildPageFrame(page) {
     var chapter = state.book.chapters[state.chapterIndex];
-    if (!chapter) return;
-
-    var pages = state.pages;
-    if (!pages.length) pages = state.pages = [{ start: 0, end: chapter.text.length }];
-    state.pageIndex = Paginate.clampPageIndex(pages, state.pageIndex);
-
-    var page = pages[state.pageIndex];
     var source = String(chapter.text || '');
     var slice = source.slice(page.start, page.end);
 
@@ -841,9 +891,39 @@
       node.textContent = trimmed;
       frame.appendChild(node);
     }
+    return frame;
+  }
+
+  /** 只把当前可见页（双页时左右两页）需要的正文渲染出来。 */
+  function renderPage() {
+    if (!state.book) return;
+    var chapter = state.book.chapters[state.chapterIndex];
+    if (!chapter) return;
+
+    var pages = state.pages;
+    if (!pages.length) pages = state.pages = [{ start: 0, end: chapter.text.length }];
+    state.pageIndex = Paginate.clampPageIndex(pages, state.pageIndex);
+
+    // 对开下始终从偶数「左页」开始，奇数页会被拉回前一个偶数页
+    if (effectiveSpread()) state.pageIndex = Paginate.pairStart(state.pageIndex);
+
+    // 每次渲染都同步一次对开相关的 UI（按钮显隐、装订线标记）
+    applySpreadChrome();
 
     el.content.innerHTML = '';
-    el.content.appendChild(frame);
+    el.content.appendChild(buildPageFrame(pages[state.pageIndex]));
+
+    if (effectiveSpread()) {
+      var rightPage = pages[state.pageIndex + 1];
+      if (rightPage) {
+        el.content.appendChild(buildPageFrame(rightPage));
+      } else {
+        // 尾章页数为奇数：右页留空占位，保持版心对称
+        var blank = document.createElement('div');
+        blank.className = 'page-frame page-frame--blank';
+        el.content.appendChild(blank);
+      }
+    }
 
     decorateChapter();
     updatePageIndicator();
@@ -854,12 +934,26 @@
     if (!el.pageIndicator) return;
     if (!isPaged()) { el.pageIndicator.hidden = true; return; }
     el.pageIndicator.hidden = false;
-    el.pageIndicator.textContent = (state.pageIndex + 1) + ' / ' + Math.max(1, state.pages.length);
-    if (el.pagePrevBtn) el.pagePrevBtn.disabled = state.pageIndex <= 0;
-    if (el.pageNextBtn) el.pageNextBtn.disabled = state.pageIndex >= state.pages.length - 1;
+
+    var n = Math.max(1, state.pages.length);
+    if (effectiveSpread()) {
+      // 双页：显示「左页–右页 / 总页」，右页越界则截断到末页
+      var left = state.pageIndex + 1;
+      var right = Math.min(state.pageIndex + 2, n);
+      // 尾页单独成页（页数为奇数）时右页越界，退化成只显示单页号，避免「5–5 / 5」
+      var label = right > left ? (left + '–' + right) : String(left);
+      el.pageIndicator.textContent = label + ' / ' + n;
+      if (el.pagePrevBtn) el.pagePrevBtn.disabled = state.pageIndex <= 0;
+      // 再往前翻一对会越过末尾就禁用「下一页」
+      if (el.pageNextBtn) el.pageNextBtn.disabled = (state.pageIndex + 2) >= n;
+    } else {
+      el.pageIndicator.textContent = (state.pageIndex + 1) + ' / ' + n;
+      if (el.pagePrevBtn) el.pagePrevBtn.disabled = state.pageIndex <= 0;
+      if (el.pageNextBtn) el.pageNextBtn.disabled = state.pageIndex >= n - 1;
+    }
   }
 
-  /** 翻 n 页；越界时跨到相邻章节的首页 / 末页。 */
+  /** 翻 n 页；双页时对开翻一对（步长 2）；越界时跨到相邻章节的首页 / 末页。 */
   function stepPage(delta) {
     if (!state.book) return;
     if (!isPaged()) {
@@ -869,13 +963,15 @@
       return;
     }
 
-    var target = state.pageIndex + delta;
+    var stride = effectiveSpread() ? 2 : 1;
+    var target = state.pageIndex + delta * stride;
 
     if (target < 0) {
-      // 已经是本章第一页 → 跳上一章的最后一页
+      // 已经是本章第一页 → 跳上一章的最后一页（对开则对齐到偶数）
       if (state.chapterIndex <= 0) return;
       renderChapter(state.chapterIndex - 1, 0);
       state.pageIndex = state.pages.length - 1;
+      if (effectiveSpread()) state.pageIndex = Paginate.pairStart(state.pageIndex);
       renderPage();
       hideToolbar();
       scheduleSave();
@@ -895,10 +991,11 @@
     scheduleSave();
   }
 
-  /** 跳到本章第一页 / 最后一页。 */
+  /** 跳到本章第一页 / 最后一页；双页下对齐到偶数左页。 */
   function gotoPageEdge(which) {
     if (!state.book || !isPaged()) return;
     state.pageIndex = which === 'end' ? state.pages.length - 1 : 0;
+    if (effectiveSpread()) state.pageIndex = Paginate.pairStart(state.pageIndex);
     hideToolbar();
     renderPage();
     scheduleSave();
@@ -1681,6 +1778,41 @@
     toast(isPaged() ? '页宽 ' + next + ' 字' : '页宽 ' + next + 'em（切到分页模式更明显）');
   }
 
+  /** 单页 ⇄ 双页对开；首次手动切换会锁定选择，不再随屏幕宽度自动变。 */
+  function toggleSpread() {
+    if (!state.book) {
+      // 还没打开书也允许切，偏好会记住
+      state.spreadUserPref = !baseSpread();
+      savePrefs({ spread: state.spreadUserPref });
+      applySpreadChrome();
+      return;
+    }
+    var anchor = currentOffset();
+    state.spreadUserPref = !baseSpread();
+    savePrefs({ spread: state.spreadUserPref });
+    applySpreadChrome();
+    repaginate(anchor);
+    toast(state.spreadUserPref ? '已切换为双页对开' : '已切回单页');
+  }
+
+  /**
+   * 根据当前对开状态刷新 UI：body 标记、切换按钮文案、隐藏/恢复「页宽」按钮。
+   * 双页下「页宽」按钮无意义（每页宽度由容器自动决定），故隐藏。
+   */
+  function applySpreadChrome() {
+    var on = baseSpread();
+    document.body.setAttribute('data-spread', on ? 'on' : 'off');
+    if (el.spreadBtn) {
+      el.spreadBtn.hidden = !isPaged();
+      el.spreadBtn.textContent = on ? '双页' : '单页';
+      el.spreadBtn.title = on ? '当前双页对开，点击切回单页' : '当前单页，点击切换为双页对开';
+      el.spreadBtn.classList.toggle('active', on);
+    }
+    var hideWidth = isPaged() && on;
+    if (el.widthUpBtn) el.widthUpBtn.hidden = hideWidth;
+    if (el.widthDownBtn) el.widthDownBtn.hidden = hideWidth;
+  }
+
   /** 滚动 ⇄ 分页。切换时必须保住阅读位置。 */
   function toggleReadingMode() {
     if (!state.book) {
@@ -1713,6 +1845,7 @@
       });
       toast('已切回滚动模式');
     }
+    applySpreadChrome();
   }
 
   /* ---------------- 事件绑定 ---------------- */
@@ -1851,6 +1984,7 @@
     el.widthUpBtn.addEventListener('click', function () { stepPageWidth(1); });
     el.widthDownBtn.addEventListener('click', function () { stepPageWidth(-1); });
     el.modeBtn.addEventListener('click', toggleReadingMode);
+    if (el.spreadBtn) el.spreadBtn.addEventListener('click', toggleSpread);
     el.themeBtn.addEventListener('click', function () {
       var next = document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       applyTheme(next);
@@ -2031,6 +2165,8 @@
       if (state.resizeTimer) clearTimeout(state.resizeTimer);
       state.resizeTimer = setTimeout(function () {
         if (!state.book || !isPaged()) return;
+        // 跟随屏幕宽度：用户没手动锁定时，宽度跨过阈值会自动切单/双页
+        applySpreadChrome();
         repaginate(currentOffset());
       }, 160);
     });
@@ -2070,6 +2206,7 @@
     el.widthUpBtn = $('btn-width-up');
     el.widthDownBtn = $('btn-width-down');
     el.modeBtn = $('btn-mode');
+    el.spreadBtn = $('btn-spread');
     el.themeBtn = $('btn-theme');
     el.progressBar = $('progress-bar');
     el.progressFill = $('progress-fill');
@@ -2114,13 +2251,16 @@
     bindEvents();
 
     var prefs = loadPrefs();
-    // 先定排版参数（字号 → 行距 → 页宽），再定模式：
+    // 先定排版参数（字号 → 行距 → 页宽），再定模式与对开：
     // 模式切换会立刻按这些参数切一次页，顺序反了就会用旧尺寸切。
     applyFontSize(prefs.fontSize || DEFAULT_FONT_SIZE);
     applyLineHeight(prefs.lineHeight || DEFAULT_LINE_HEIGHT);
     applyPageWidth(prefs.pageWidth || DEFAULT_PAGE_WIDTH);
     applyTheme(prefs.theme || 'light');
     applyReadingMode(prefs.readingMode || MODE_SCROLL);
+    // 对开偏好：null = 跟随屏幕宽度自动；true/false = 用户手动锁定
+    state.spreadUserPref = (prefs.spread === true || prefs.spread === false) ? prefs.spread : null;
+    applySpreadChrome();
 
     renderShelf();
     initCache(function () {

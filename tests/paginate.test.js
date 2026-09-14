@@ -288,3 +288,18 @@ test('paginateChapter 估算偏保守：整数行高恰好放满时不会把边�
     assert.ok(cost <= 10 + 1.2, '第 ' + i + ' 页超出页容量：' + cost.toFixed(2));
   });
 });
+
+test('pairStart 把任意页序号对齐到偶数左页（双页对开用）', () => {
+  assert.equal(Paginate.pairStart(0), 0);
+  assert.equal(Paginate.pairStart(1), 0);
+  assert.equal(Paginate.pairStart(2), 2);
+  assert.equal(Paginate.pairStart(3), 2);
+  assert.equal(Paginate.pairStart(4), 4);
+  assert.equal(Paginate.pairStart(5), 4);
+  // 负数 / 非法输入回退到 0
+  assert.equal(Paginate.pairStart(-1), 0);
+  assert.equal(Paginate.pairStart(-3), 0);
+  assert.equal(Paginate.pairStart('x'), 0);
+  // 奇数页作为左页时会被拉回前一个偶数页，保证两页成对出现
+  assert.equal(Paginate.pairStart(Paginate.pairStart(7) + 1), Paginate.pairStart(7));
+});

@@ -344,6 +344,25 @@ body[data-mode="paged"] .reader-content {
   overflow: hidden;
 }
 
+/* 对开（双页）布局：两个 .page-frame 横向并排，中间是装订线 */
+body[data-mode="paged"][data-spread="on"] .page-frame {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 46em; /* 单页不过宽，超出则居中留白，与 idealMetrics 的 SPREAD_MAX_PAGE_EM 一致 */
+  margin: 0;
+}
+
+body[data-mode="paged"][data-spread="on"] .page-frame + .page-frame {
+  border-left: 1px solid var(--page-gutter, rgba(127, 127, 127, 0.18));
+  box-shadow: inset 20px 0 24px -22px rgba(0, 0, 0, 0.4); /* 装订线阴影 */
+}
+
+/* 尾章页数为奇数时，右页留空但保留占位，保持版心对称 */
+body[data-mode="paged"][data-spread="on"] .page-frame--blank {
+  visibility: hidden;
+}
+
 .page-frame h2 {
   font-family: var(--font-serif);
   font-size: calc(var(--reader-font-size) * 1.25);

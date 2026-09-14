@@ -764,6 +764,81 @@ function sizeOf(p) {
   }
   if (!backToScroll.prevChapShown) throw new Error('切回滚动后「上一章」没有恢复显示');
 
+  /* ---- 双页对开 ---- */
+  log('');
+  await page.click('#btn-mode'); // 上一步在滚动模式，先切回分页
+  await page.waitForTimeout(600);
+  // 确保进入双页：若按钮仍显示「单页」就点一下切换
+  let spreadLabel = await page.evaluate(() => document.getElementById('btn-spread').textContent.trim());
+  if (spreadLabel !== '双页') {
+    await page.click('#btn-spread');
+    await page.waitForTimeout(500);
+  }
+  log('17. 双页对开（在分页模式下测）：');
+  const spread = await page.evaluate(() => {
+    const c = document.getElementById('reader-content');
+    const frames = document.querySelectorAll('#reader-content .page-frame');
+    const r0 = frames[0] ? frames[0].getBoundingClientRect() : null;
+    const r1 = frames[1] ? frames[1].getBoundingClientRect() : null;
+    const cr = c.getBoundingClientRect();
+    return {
+      mode: document.body.getAttribute('data-mode'),
+      dataSpread: document.body.getAttribute('data-spread'),
+      frames: frames.length,
+      leftMid: r0 ? r0.left + r0.width / 2 : 0,
+      rightMid: r1 ? r1.left + r1.width / 2 : 0,
+      containerMid: cr.left + cr.width / 2,
+      widthBtnHidden: getComputedStyle(document.getElementById('btn-width-up')).display === 'none',
+      overflow: c.scrollHeight - c.clientHeight
+    };
+  });
+  log('    data-spread=' + spread.dataSpread + '　页框数=' + spread.frames +
+    '　「页宽」按钮已隐藏=' + spread.widthBtnHidden + '　溢出=' + spread.overflow + 'px');
+  if (spread.mode !== 'paged') throw new Error('应为分页模式');
+  if (spread.dataSpread !== 'on') throw new Error('双页标记 data-spread 未开启');
+  if (spread.frames < 2) throw new Error('双页应渲染两个页框，实际 ' + spread.frames);
+  if (spread.overflow > 2) throw new Error('双页当前页溢出 ' + spread.overflow + 'px');
+  if (!spread.widthBtnHidden) throw new Error('双页下「页宽」按钮应隐藏');
+  if (spread.frames >= 2) {
+    if (!(spread.leftMid < spread.containerMid && spread.rightMid > spread.containerMid)) {
+      throw new Error('双页没有左右并排：左页中点 ' + Math.round(spread.leftMid) +
+        ' 右页中点 ' + Math.round(spread.rightMid) + ' 容器中点 ' + Math.round(spread.containerMid));
+    }
+    log('    两页左右并排：左页中点=' + Math.round(spread.leftMid) +
+      '　右页中点=' + Math.round(spread.rightMid) + '　容器中点=' + Math.round(spread.containerMid));
+  }
+
+  // 翻一对：页码应前进、右页仍在
+  const spreadBefore = await page.evaluate(() => document.getElementById('page-indicator').textContent);
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(260);
+  const spreadAfter = await page.evaluate(() => {
+    const frames = document.querySelectorAll('#reader-content .page-frame');
+    const first = frames[0] ? frames[0].querySelector('[data-off]') : null;
+    return {
+      ind: document.getElementById('page-indicator').textContent,
+      off: first ? first.getAttribute('data-off') : null,
+      frames: frames.length
+    };
+  });
+  log('    翻一对：' + spreadBefore + ' → ' + spreadAfter.ind + '（页框数=' + spreadAfter.frames + '）');
+  if (spreadAfter.ind === spreadBefore) throw new Error('双页翻页后页码没有前进');
+  if (spreadAfter.frames < 2) throw new Error('翻页后右页丢失');
+
+  // 切回单页：只剩一个页框、页宽按钮恢复
+  await page.click('#btn-spread');
+  await page.waitForTimeout(500);
+  const single = await page.evaluate(() => ({
+    dataSpread: document.body.getAttribute('data-spread'),
+    frames: document.querySelectorAll('#reader-content .page-frame').length,
+    widthBtnHidden: getComputedStyle(document.getElementById('btn-width-up')).display === 'none'
+  }));
+  log('    切回单页：data-spread=' + single.dataSpread + '　页框数=' + single.frames +
+    '　「页宽」按钮恢复显示=' + (!single.widthBtnHidden));
+  if (single.dataSpread !== 'off') throw new Error('切回单页后 data-spread 仍为 on');
+  if (single.frames !== 1) throw new Error('单页应只剩一个页框，实际 ' + single.frames);
+  if (single.widthBtnHidden) throw new Error('单页下「页宽」按钮应恢复显示');
+
   log('');
   log('页面错误：' + (errors.length ? errors.join(' | ') : '无'));
 
