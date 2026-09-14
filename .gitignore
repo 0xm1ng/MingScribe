@@ -26,3 +26,8 @@ tools/_*
 _*.txt
 _*.js
 _sample.epub
+
+# Rust / Tauri 构建产物
+src-tauri/target/
+src-tauri/gen/
+src-tauri/target/*
