@@ -5,6 +5,7 @@
 node_modules/
 dist/
 build/
+releases/
 
 # 编辑器与系统
 .vscode/

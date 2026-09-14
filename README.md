@@ -296,7 +296,16 @@ npm run tauri:build
 （该目录不入库），桌面版只嵌入这个目录。**不要**把 `frontendDist` 改回项目根：Tauri 会递归嵌入
 其下的全部文件，把 `node_modules/`、`.git/`、`src-tauri/target/` 一起塞进安装包。
 
-产物在 `src-tauri/target/release/bundle/`（`nsis` 安装程序与 `msi` 包）。
+产物在 `src-tauri/target/release/bundle/`，同时会复制到 `releases/`（该目录不入库）：
+
+| 产物 | 体积 | 说明 |
+|---|---|---|
+| `MingScribe_0.1.0_x64-setup.exe`（nsis） | 1.83 MB | 常规安装程序，推荐 |
+| `MingScribe_0.1.0_x64_en-US.msi`（msi） | 2.75 MB | 适合企业批量部署 |
+
+体积这么小是因为**不打包 WebView2 运行时**——Windows 10/11 已内置 Edge WebView2，
+安装程序只带应用本体与前端资源（前端被压缩后嵌进二进制）。首次构建需要完整编译 Rust 依赖
+（实测 86 分钟），之后是增量（约 6 分钟）。
 
 ### 支持格式表
 
