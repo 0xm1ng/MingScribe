@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "ebooks": "python tools/build_ebooks.py",
-    "ebooks:check": "python tools/sample_check.py"
+    "ebooks:check": "python tools/sample_check.py",
+    "convert:check": "node tools/convert_check.js"
   },
   "keywords": [
     "ebook",
