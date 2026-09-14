@@ -147,6 +147,13 @@
     });
   };
 
+  /**
+   * 探测编码：先看文件自己的声明，声明缺失时按内容猜测。
+   *
+   * 为什么需要「猜」这一层：Calibre 转换出的 EPUB 里，章节 XHTML
+   * 常常既不写 XML encoding 也不写 meta charset（源文件继承来的字节直接塞进去），
+   * 只按声明判断会一律回退 UTF-8，非 UTF-8 源就整章乱码。
+   */
   function detectEncoding(bytes) {
     // 先用 UTF-8 读前 4KB 找声明，避免大文件浪费
     var probe = decodeBytes(bytes, 'utf-8', 4096);
@@ -156,7 +163,63 @@
     if (meta1) return normalizeEncoding(meta1[1]);
     var meta2 = /<meta\s[^>]*http-equiv\s*=\s*["']?content-type["']?[^>]*content\s*=\s*["'][^"]*charset\s*=\s*([^"';\s]+)["']/i.exec(probe);
     if (meta2) return normalizeEncoding(meta2[1]);
-    return 'utf-8';
+    return sniffEncoding(bytes);
+  }
+
+  /** 无声明时按字节特征猜：能干净地按 UTF-8 解出就用 UTF-8，否则试常见中文编码。 */
+  function sniffEncoding(bytes) {
+    var head = bytes.length > 65536 ? bytes.subarray(0, 65536) : bytes;
+    if (looksLikeUtf8(head)) return 'utf-8';
+
+    var candidates = ['gb18030', 'big5'];
+    var best = 'utf-8';
+    var bestScore = -1;
+    for (var i = 0; i < candidates.length; i++) {
+      var text = decodeBytes(head, candidates[i]);
+      var score = cjkScore(text);
+      if (score > bestScore) { bestScore = score; best = candidates[i]; }
+    }
+    return bestScore > 0 ? best : 'utf-8';
+  }
+
+  /**
+   * 判断字节序列是否是合法 UTF-8。
+   * 只有全部多字节序列都符合 UTF-8 规则才算——GBK 双字节很容易违反，
+   * 所以这个方法足以把中文 GBK 与 UTF-8 区分开。
+   */
+  function looksLikeUtf8(b) {
+    var i = 0;
+    while (i < b.length) {
+      var c = b[i];
+      if (c < 0x80) { i++; continue; }
+      var need;
+      if ((c & 0xe0) === 0xc0) need = 1;
+      else if ((c & 0xf0) === 0xe0) need = 2;
+      else if ((c & 0xf8) === 0xf0) need = 3;
+      else return false;
+      if (i + need >= b.length) return false;
+      for (var k = 1; k <= need; k++) {
+        if ((b[i + k] & 0xc0) !== 0x80) return false;
+      }
+      i += need + 1;
+    }
+    return true;
+  }
+
+  /** 统计「像正常中文」的字符比例：CJK 汉字与中文标点。字越多越可能是对的解码。 */
+  function cjkScore(text) {
+    var total = 0;
+    var cjk = 0;
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if (code === 0xfffd) return -1; // 出现替换字符，这个编码肯定不对
+      if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) return -1;
+      total++;
+      if ((code >= 0x4e00 && code <= 0x9fff) ||
+          (code >= 0x3000 && code <= 0x303f) ||
+          (code >= 0xff00 && code <= 0xffef)) cjk++;
+    }
+    return total ? cjk / total : 0;
   }
 
   function normalizeEncoding(name) {

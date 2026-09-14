@@ -177,52 +177,80 @@ test('xhtmlToText：br 产生换行、注释被移除', () => {
   assert.deepEqual(text.split('\n'), ['甲乙', '丙', '丁']);
 });
 
-test('GBK 编码的章节按声明解码，中文不乱码', async () => {
-  // Node 的 Buffer 不原生支持 GBK，所以手动拼出关键中文的 GBK 字节
-  const GBK = {
-    '第': [0xB5, 0xDA], '一': [0xD2, 0xBB], '章': [0xD5, 0xC2],
-    '中': [0xD6, 0xD0], '文': [0xCE, 0xC4], '标': [0xB1, 0xEA], '题': [0xCC, 0xE2],
-    '这': [0xD5, 0xE2], '是': [0xCA, 0xC7], '编': [0xB1, 0xE0], '码': [0xC2, 0xEB],
-    '的': [0xB5, 0xC4], '正': [0xD5, 0xFD], '。': [0xA1, 0xA3], ' ': [0x20]
-  };
-  function gbkBytes(str) {
-    const out = [];
-    for (const ch of str) {
-      if (GBK[ch]) out.push(...GBK[ch]);
-      else {
-        const b = Buffer.from(ch, 'latin1');
-        for (let i = 0; i < b.length; i++) out.push(b[i]);
-      }
+/**
+ * 手工拼 GBK 字节：Node 的 Buffer 不原生支持 GBK 编码。
+ * 注意 0xB5DA 这类双字节在 UTF-8 里是非法序列，所以也能验证「无声明时的嗅探」。
+ */
+const GBK_MAP = {
+  '第': [0xB5, 0xDA], '一': [0xD2, 0xBB], '章': [0xD5, 0xC2],
+  '中': [0xD6, 0xD0], '文': [0xCE, 0xC4], '标': [0xB1, 0xEA], '题': [0xCC, 0xE2],
+  '这': [0xD5, 0xE2], '是': [0xCA, 0xC7], '编': [0xB1, 0xE0], '码': [0xC2, 0xEB],
+  '的': [0xB5, 0xC4], '正': [0xD5, 0xFD], '。': [0xA1, 0xA3], ' ': [0x20]
+};
+function gbkBytes(str) {
+  const out = [];
+  for (const ch of str) {
+    if (GBK_MAP[ch]) out.push(...GBK_MAP[ch]);
+    else {
+      const b = Buffer.from(ch, 'latin1');
+      for (let i = 0; i < b.length; i++) out.push(b[i]);
     }
-    return Buffer.from(out);
   }
-  const title = gbkBytes('第一章 中文标题');
-  const body = gbkBytes('这是 GBK 编码的中文正文。');
-  const head = Buffer.from('<?xml version="1.0" encoding="gbk"?>\n' +
-    '<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="gbk"/></head><body>' +
-    '<h1>', 'latin1');
-  const mid = Buffer.from('</h1><p>', 'latin1');
-  const tail = Buffer.from('</p></body></html>', 'latin1');
-  const html = Buffer.concat([head, title, mid, body, tail]);
+  return Buffer.from(out);
+}
 
+/** 构造「单章、指定章节字节」的最小 EPUB。 */
+function buildOneChapterEpub(chapterBytes) {
   const opf = `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <dc:title>GBK 编码测试</dc:title>
+  <dc:title>编码测试</dc:title>
 </metadata>
 <manifest>
   <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
 </manifest>
 <spine><itemref idref="c1"/></spine>
 </package>`;
-
-  const buf = buildZip([
+  return buildZip([
     { name: 'mimetype', data: 'application/epub+zip', store: true },
     { name: 'META-INF/container.xml', data: '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>', store: true },
     { name: 'OEBPS/content.opf', data: opf },
-    { name: 'OEBPS/chapter1.xhtml', data: html, store: true }
+    { name: 'OEBPS/chapter1.xhtml', data: chapterBytes, store: true }
   ]);
-  const book = await parse(buf);
+}
+
+test('GBK 编码的章节按声明解码，中文不乱码', async () => {
+  const head = Buffer.from('<?xml version="1.0" encoding="gbk"?>\n' +
+    '<html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="gbk"/></head><body>' +
+    '<h1>', 'latin1');
+  const mid = Buffer.from('</h1><p>', 'latin1');
+  const tail = Buffer.from('</p></body></html>', 'latin1');
+  const html = Buffer.concat([
+    head, gbkBytes('第一章 中文标题'), mid, gbkBytes('这是 GBK 编码的中文正文。'), tail
+  ]);
+
+  const book = await parse(buildOneChapterEpub(html));
   assert.ok(book.chapters[0].text.includes('中文正文'), 'GBK 编码的章节内容应被正确解码');
   assert.ok(book.chapters[0].title.includes('中文标题'), 'GBK 编码的章节标题应被正确解码');
+});
+
+test('章节未声明编码时，按字节嗅探识别 GBK（Calibre 转换的典型情形）', async () => {
+  // 关键：完全不写 encoding 与 charset，模拟 Calibre 直接把源字节塞进 XHTML
+  const head = Buffer.from('<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>', 'latin1');
+  const mid = Buffer.from('</h1><p>', 'latin1');
+  const tail = Buffer.from('</p></body></html>', 'latin1');
+  const html = Buffer.concat([
+    head, gbkBytes('第一章 中文标题'), mid, gbkBytes('这是 GBK 编码的中文正文。'), tail
+  ]);
+
+  const book = await parse(buildOneChapterEpub(html));
+  assert.ok(book.chapters[0].text.includes('中文正文'), '无声明时也应识别出 GBK 并正确解码');
+});
+
+test('UTF-8 无声明时不会被误判成 GBK', async () => {
+  const html = '<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
+    '<h1>第一章 中文标题</h1><p>这是 UTF-8 的中文正文。</p></body></html>';
+  const book = await parse(buildOneChapterEpub(Buffer.from(html, 'utf8')));
+  assert.ok(book.chapters[0].text.includes('中文正文'), 'UTF-8 应保持原样解码');
+  assert.ok(!book.chapters[0].text.includes('\ufffd'), '不应出现替换字符');
 });
