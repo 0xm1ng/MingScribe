@@ -19,6 +19,7 @@ const REPORT = 'D:\\MingScribe\\tools\\_e2e_report.txt';
 const SHOT = 'D:\\MingScribe\\tools\\_e2e_shot.png';
 const EXPORT_MD = 'D:\\MingScribe\\tools\\_e2e_export.md';
 const SHOT_NOTES = 'D:\\MingScribe\\tools\\_e2e_notes.png';
+const SHOT_PAGED = 'D:\\MingScribe\\tools\\_e2e_paged.png';
 
 const lines = [];
 function log(text) { lines.push(text); }
@@ -442,6 +443,326 @@ function sizeOf(p) {
   log('15. 刷新后从缓存直接打开 EPUB（rebuildFromCache 路径）：');
   log('    书名=' + epubCached.book + '　恢复到章=' + epubCached.chapter +
     '　目录条数=' + epubCached.toc + '　划线仍在=' + epubCached.marks);
+
+  /* ---- 分页阅读模式 ---- */
+  // 用一个「一章装不下」的大书中章来测：短章只有一页，翻页无从验证。
+  // 注意按书名挑书，不能用 nth=1 —— 此时书架里除大书外还有 EPUB 样例。
+  const PAGED_CHAPTER = 146;
+  const BIG_NAME = 'Hello-CTF - 开源CTF入门教程';
+  log('');
+  await page.click('#btn-back');
+  await page.waitForSelector('#shelf-screen:not([hidden])');
+
+  const openedBig = await page.evaluate((name) => {
+    const items = Array.prototype.slice.call(document.querySelectorAll('#shelf-list .shelf-item'));
+    const hit = items.filter((li) => li.textContent.indexOf(name) >= 0)[0];
+    if (!hit) return false;
+    const btn = hit.querySelector('button[data-action="open"]');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }, BIG_NAME);
+  if (!openedBig) throw new Error('书架上找不到大书「' + BIG_NAME + '」，无法验证分页翻页');
+
+  await page.waitForFunction(
+    () => document.querySelectorAll('#reader-content [data-off]').length > 0,
+    null,
+    { timeout: 60000 }
+  );
+  await page.waitForTimeout(400);
+  await page.click('#btn-toc');
+  await page.waitForTimeout(200);
+  await page.evaluate((n) => {
+    const li = document.querySelectorAll('#toc-list li')[n];
+    if (li) li.click();
+  }, PAGED_CHAPTER - 1);
+  await page.waitForTimeout(400);
+  log('16. 分页阅读模式（在第 ' + PAGED_CHAPTER + ' 章上测，该章一屏装不下）：');
+
+  // 切到分页
+  await page.click('#btn-mode');
+  await page.waitForTimeout(600);
+  const paged = await page.evaluate(() => ({
+    mode: document.body.getAttribute('data-mode'),
+    chapter: document.getElementById('reader-chapter-name').textContent,
+    frames: document.querySelectorAll('#reader-content .page-frame').length,
+    paras: document.querySelectorAll('#reader-content .page-frame p, #reader-content .page-frame h2').length,
+    indicator: document.getElementById('page-indicator').textContent,
+    indicatorShown: !document.getElementById('page-indicator').hidden,
+    prevChapHidden: getComputedStyle(document.getElementById('btn-prev')).display === 'none',
+    pageEdgeShown: getComputedStyle(document.getElementById('btn-page-next')).display !== 'none',
+    scrollable: document.getElementById('reader-content').scrollHeight -
+      document.getElementById('reader-content').clientHeight
+  }));
+  log('    所在章=' + paged.chapter);
+  log('    切到分页：mode=' + paged.mode + '　页框数=' + paged.frames +
+    '　本页段落数=' + paged.paras + '　页码=' + paged.indicator +
+    '（可见=' + paged.indicatorShown + '）');
+  log('    「上一章」按钮已隐藏=' + paged.prevChapHidden + '　翻页热区可见=' + paged.pageEdgeShown +
+    '　内容不再滚动（scrollHeight-clientHeight=' + paged.scrollable + '）');
+
+  if (paged.mode !== 'paged') throw new Error('切换分页模式失败：data-mode=' + paged.mode);
+  if (!paged.frames) throw new Error('分页模式下没有渲染 .page-frame');
+  if (paged.scrollable > 2) throw new Error('分页模式下内容仍然可滚动，溢出 ' + paged.scrollable + 'px');
+
+  const totalPages = Number((paged.indicator.split('/')[1] || '1').trim());
+  log('    该章共 ' + totalPages + ' 页');
+  if (totalPages < 2) {
+    throw new Error('第 ' + PAGED_CHAPTER + ' 章只有 ' + totalPages + ' 页，无法验证翻页；换一个更长的章');
+  }
+
+  // 翻页：记录每页首字，确认内容真的在换；同时记录所在章，好在跨章时也能对账
+  const pageTexts = [];
+  for (let i = 0; i < 3; i++) {
+    pageTexts.push(await page.evaluate(() => {
+      const first = document.querySelector('#reader-content .page-frame [data-off]');
+      return {
+        off: first ? first.getAttribute('data-off') : null,
+        ind: document.getElementById('page-indicator').textContent,
+        ch: document.getElementById('reader-chapter-name').textContent
+      };
+    }));
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(240);
+  }
+  log('    连按 3 次 → ：' + pageTexts.map((p) => '[' + p.ch + ' ' + p.ind + ' @' + p.off + ']').join(' '));
+
+  // 「前进」的判定：换页就算前进，换到下一章也算；只有在同章同页才算没动
+  const advanced = pageTexts.some((p, i) => i > 0 &&
+    (p.ch !== pageTexts[i - 1].ch || p.off !== pageTexts[i - 1].off));
+  log('    每页内容/所属章都在前进：' + advanced);
+  if (!advanced) throw new Error('翻页后内容没有变化，可能没真的翻页');
+
+  // 往回翻：逐页回退，最终必须精确回到起点（同章同页同偏移）
+  const backTrace = [];
+  for (let i = 0; i < pageTexts.length; i++) {
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(240);
+    backTrace.push(await page.evaluate(() => {
+      const first = document.querySelector('#reader-content .page-frame [data-off]');
+      return {
+        off: first ? first.getAttribute('data-off') : null,
+        ind: document.getElementById('page-indicator').textContent,
+        ch: document.getElementById('reader-chapter-name').textContent
+      };
+    }));
+  }
+  log('    再按 ' + pageTexts.length + ' 次 ←：' +
+    backTrace.map((p) => '[' + p.ch + ' ' + p.ind + ' @' + p.off + ']').join(' '));
+  const back = backTrace[backTrace.length - 1];
+  log('    回到起点校验：' + back.ch + ' @' + back.off +
+    '（期望 ' + pageTexts[0].ch + ' @' + pageTexts[0].off + '）');
+  if (back.ch !== pageTexts[0].ch || back.off !== pageTexts[0].off) {
+    throw new Error('往回翻没有回到原页：得到 ' + back.ch + ' @' + back.off +
+      '，期望 ' + pageTexts[0].ch + ' @' + pageTexts[0].off);
+  }
+
+  // 跨章前进再跨章退回：验证章边界处的页衔接（这是最容易错的地方）
+  const crossStart = backTrace[backTrace.length - 1];
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(260);
+  const crossFwd = await page.evaluate(() => ({
+    off: document.querySelector('#reader-content .page-frame [data-off]').getAttribute('data-off'),
+    ind: document.getElementById('page-indicator').textContent,
+    ch: document.getElementById('reader-chapter-name').textContent
+  }));
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(260);
+  const crossBack = await page.evaluate(() => ({
+    off: document.querySelector('#reader-content .page-frame [data-off]').getAttribute('data-off'),
+    ind: document.getElementById('page-indicator').textContent,
+    ch: document.getElementById('reader-chapter-name').textContent
+  }));
+  log('    章边界往返：' + crossStart.ch + ' @' + crossStart.off + ' → →' +
+    crossFwd.ch + ' @' + crossFwd.off + ' → ←' + crossBack.ch + ' @' + crossBack.off);
+  if (crossBack.ch !== crossStart.ch || crossBack.off !== crossStart.off) {
+    throw new Error('章边界往返没有回到原处：' + crossBack.ch + ' @' + crossBack.off);
+  }
+
+  // 同一章的不同页必须渲染不同内容（不能是同一段被反复渲染）
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(260);
+  const secondPageText = await page.evaluate(() => {
+    const ps = document.querySelectorAll('#reader-content .page-frame p');
+    return ps.length ? ps[0].textContent.slice(0, 18) : '';
+  });
+  log('    第二页首段开头：「' + secondPageText + '…」');
+
+  // 改字号后：总页数只增不减、阅读位置不漂太多、当前页不溢出
+  const beforeFont = await page.evaluate(() => {
+    const first = document.querySelector('#reader-content .page-frame [data-off]');
+    const c = document.getElementById('reader-content');
+    return {
+      off: Number(first.getAttribute('data-off')),
+      ind: document.getElementById('page-indicator').textContent,
+      total: Number((document.getElementById('page-indicator').textContent.split('/')[1] || '1').trim()),
+      overflow: c.scrollHeight - c.clientHeight
+    };
+  });
+  if (beforeFont.overflow > 2) {
+    throw new Error('切页前当前页就溢出了 ' + beforeFont.overflow + 'px，文字会被裁掉');
+  }
+
+  // 连按两次放大，每次都检查溢出
+  const zoomTrace = [beforeFont];
+  for (let i = 0; i < 2; i++) {
+    await page.click('#btn-font-up');
+    await page.waitForTimeout(500);
+    zoomTrace.push(await page.evaluate(() => {
+      const first = document.querySelector('#reader-content .page-frame [data-off]');
+      const c = document.getElementById('reader-content');
+      return {
+        off: Number(first.getAttribute('data-off')),
+        ind: document.getElementById('page-indicator').textContent,
+        total: Number((document.getElementById('page-indicator').textContent.split('/')[1] || '1').trim()),
+        overflow: c.scrollHeight - c.clientHeight
+      };
+    }));
+  }
+  log('    放大字号：' + zoomTrace.map((z) => z.total + '页@' + z.off).join(' → ') +
+    '（总页数只增不减）');
+  log('    每次放大后溢出量：' + zoomTrace.map((z) => z.overflow + 'px').join(' / ') + '（均应 ≤ 2px）');
+
+  for (let i = 1; i < zoomTrace.length; i++) {
+    if (zoomTrace[i].total < zoomTrace[i - 1].total) {
+      throw new Error('放大字号后总页数反而减少：' + zoomTrace[i - 1].total + ' → ' + zoomTrace[i].total);
+    }
+    if (zoomTrace[i].overflow > 2) {
+      throw new Error('放大字号后当前页溢出 ' + zoomTrace[i].overflow + 'px，文字被裁掉');
+    }
+  }
+  // 页边界会因字号变化而移动，但内容不能跳到别的章节去
+  const fontDrift = Math.abs(zoomTrace[zoomTrace.length - 1].off - beforeFont.off);
+  log('    阅读位置漂移：' + fontDrift + ' 字（同一章内即可）');
+  if (fontDrift > 1500) {
+    throw new Error('改字号后阅读位置漂移过大：' + beforeFont.off + ' → ' + zoomTrace[zoomTrace.length - 1].off);
+  }
+
+  // 缩回原字号
+  await page.click('#btn-font-down');
+  await page.waitForTimeout(400);
+  await page.click('#btn-font-down');
+  await page.waitForTimeout(400);
+
+  // 行距与页宽
+  const beforeLayout = await page.evaluate(() => ({
+    lh: getComputedStyle(document.documentElement).getPropertyValue('--reader-line-height').trim(),
+    width: getComputedStyle(document.documentElement).getPropertyValue('--page-width').trim(),
+    pages: document.getElementById('page-indicator').textContent,
+    total: Number((document.getElementById('page-indicator').textContent.split('/')[1] || '1').trim()),
+    overflow: document.getElementById('reader-content').scrollHeight -
+      document.getElementById('reader-content').clientHeight
+  }));
+  await page.click('#btn-line-up');
+  await page.waitForTimeout(450);
+  const afterLine = await page.evaluate(() => ({
+    lh: getComputedStyle(document.documentElement).getPropertyValue('--reader-line-height').trim(),
+    total: Number((document.getElementById('page-indicator').textContent.split('/')[1] || '1').trim()),
+    overflow: document.getElementById('reader-content').scrollHeight -
+      document.getElementById('reader-content').clientHeight
+  }));
+  await page.click('#btn-width-down');
+  await page.waitForTimeout(450);
+  const afterLayout = await page.evaluate(() => ({
+    lh: getComputedStyle(document.documentElement).getPropertyValue('--reader-line-height').trim(),
+    width: getComputedStyle(document.documentElement).getPropertyValue('--page-width').trim(),
+    pages: document.getElementById('page-indicator').textContent,
+    total: Number((document.getElementById('page-indicator').textContent.split('/')[1] || '1').trim()),
+    overflow: document.getElementById('reader-content').scrollHeight -
+      document.getElementById('reader-content').clientHeight
+  }));
+  log('    行距 ' + beforeLayout.lh + ' → ' + afterLine.lh +
+    '（页数 ' + beforeLayout.total + ' → ' + afterLine.total + '，溢出 ' + afterLine.overflow + 'px）');
+  log('    页宽 ' + beforeLayout.width + ' → ' + afterLayout.width +
+    '（页数 ' + afterLine.total + ' → ' + afterLayout.total + '，溢出 ' + afterLayout.overflow + 'px）');
+  if (beforeLayout.lh === afterLayout.lh) throw new Error('行距没有变化');
+  if (beforeLayout.width === afterLayout.width) throw new Error('页宽没有变化');
+  if (afterLine.total < beforeLayout.total) {
+    throw new Error('放宽行距后总页数反而减少：' + beforeLayout.total + ' → ' + afterLine.total);
+  }
+  if (afterLayout.total < afterLine.total) {
+    throw new Error('收窄页宽后总页数反而减少：' + afterLine.total + ' → ' + afterLayout.total);
+  }
+  if (afterLayout.overflow > 2) {
+    throw new Error('调整排版后当前页溢出 ' + afterLayout.overflow + 'px');
+  }
+
+  await page.screenshot({ path: SHOT_PAGED });
+
+  // 分页模式下划线仍然可用（锚点与滚动模式共用同一套字符偏移）
+  await page.evaluate(() => {
+    const p = document.querySelector('#reader-content .page-frame p');
+    const range = document.createRange();
+    range.setStart(p.firstChild, 0);
+    range.setEnd(p.firstChild, Math.min(6, p.firstChild.length));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.getElementById('reader-content').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await page.waitForTimeout(300);
+  const hlVisiblePaged = await page.locator('.hl-swatch.hl-yellow').isVisible();
+  await page.click('.hl-swatch.hl-yellow');
+  await page.waitForTimeout(350);
+  const marksPaged = await page.evaluate(() => document.querySelectorAll('#reader-content mark.hl').length);
+  log('    分页模式下划线：工具条可见=' + hlVisiblePaged + '　本页划线数=' + marksPaged);
+  if (!hlVisiblePaged || marksPaged < 1) throw new Error('分页模式下划线不可用');
+
+  // 用页码找回刚才那页：进度条拖回同一位置后应重建页边界，不能报错
+  const beforeReload = await page.evaluate(() => ({
+    chapter: document.getElementById('reader-chapter-name').textContent,
+    ind: document.getElementById('page-indicator').textContent
+  }));
+
+  // 刷新后模式、排版偏好与书签位置都要被记住
+  await page.reload();
+  await page.waitForSelector('#shelf-screen:not([hidden])');
+  const reopened = await page.evaluate((name) => {
+    const items = Array.prototype.slice.call(document.querySelectorAll('#shelf-list .shelf-item'));
+    const hit = items.filter((li) => li.textContent.indexOf(name) >= 0)[0];
+    if (!hit) return false;
+    hit.querySelector('button[data-action="open"]').click();
+    return true;
+  }, BIG_NAME);
+  if (!reopened) throw new Error('刷新后书架上找不到大书「' + BIG_NAME + '」');
+  await page.waitForTimeout(1500);
+  const restored = await page.evaluate(() => ({
+    mode: document.body.getAttribute('data-mode'),
+    lh: getComputedStyle(document.documentElement).getPropertyValue('--reader-line-height').trim(),
+    width: getComputedStyle(document.documentElement).getPropertyValue('--page-width').trim(),
+    frame: document.querySelectorAll('#reader-content .page-frame').length,
+    chapter: document.getElementById('reader-chapter-name').textContent,
+    ind: document.getElementById('page-indicator').textContent,
+    params: window.MingScribe.Paginate ? 'ok' : 'missing'
+  }));
+  log('    刷新前：章=' + beforeReload.chapter + '　页码=' + beforeReload.ind);
+  log('    刷新后恢复：mode=' + restored.mode + '　行距=' + restored.lh +
+    '　页宽=' + restored.width + '　页框=' + restored.frame +
+    '　章=' + restored.chapter + '　页码=' + restored.ind + '　Paginate 模块=' + restored.params);
+  if (restored.mode !== 'paged') throw new Error('刷新后没有恢复分页模式');
+  if (!restored.frame) throw new Error('刷新后分页模式没有渲染页框');
+  if (restored.chapter !== beforeReload.chapter) {
+    throw new Error('刷新后没有恢复到原来章节：' + restored.chapter + ' ≠ ' + beforeReload.chapter);
+  }
+
+  // 切回滚动模式，整章都要渲染出来
+  await page.click('#btn-mode');
+  await page.waitForTimeout(600);
+  const backToScroll = await page.evaluate(() => ({
+    mode: document.body.getAttribute('data-mode'),
+    frame: document.querySelectorAll('#reader-content .page-frame').length,
+    paras: document.querySelectorAll('#reader-content [data-off]').length,
+    indicatorHidden: document.getElementById('page-indicator').hidden,
+    prevChapShown: getComputedStyle(document.getElementById('btn-prev')).display !== 'none'
+  }));
+  log('    切回滚动：mode=' + backToScroll.mode + '　页框数=' + backToScroll.frame +
+    '　整章段落数=' + backToScroll.paras + '　页码已隐藏=' + backToScroll.indicatorHidden +
+    '　「上一章」已恢复=' + backToScroll.prevChapShown);
+  if (backToScroll.mode !== 'scroll') throw new Error('切回滚动模式失败');
+  if (backToScroll.paras <= paged.paras) {
+    throw new Error('滚动模式应渲染整章，段落数 ' + backToScroll.paras + ' 未超过单页 ' + paged.paras);
+  }
+  if (!backToScroll.prevChapShown) throw new Error('切回滚动后「上一章」没有恢复显示');
 
   log('');
   log('页面错误：' + (errors.length ? errors.join(' | ') : '无'));

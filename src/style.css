@@ -15,6 +15,8 @@
   --radius: 10px;
   --reader-font-size: 19px;
   --reader-line-height: 1.85;
+  /* 分页模式下正文一行的最大宽度。比一屏短一截，回到「书页」的阅读体验 */
+  --page-width: 36em;
 }
 
 body[data-theme="dark"] {
@@ -298,6 +300,139 @@ body {
 }
 
 .reader-content:focus { outline: none; }
+
+/* ---------- 分页阅读模式 ---------- */
+
+/*
+ * 分页模式的核心：内容区不再滚动，宽度由「页宽」而不是窗口决定。
+ * 切页由 src/paginate.js 算好，这里只负责把这一页的字居中排进固定宽度的框。
+ */
+.reader-view {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body[data-mode="paged"] .reader-content {
+  overflow: hidden;
+  scroll-behavior: auto;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  /* 整页换内容会晃眼，给一个很轻的淡入 */
+  animation: page-fade 0.16s ease-out;
+}
+
+@keyframes page-fade {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-mode="paged"] .reader-content { animation: none; }
+}
+
+/* 页宽只作用在这个内框上 */
+.page-frame {
+  width: 100%;
+  max-width: var(--page-width);
+  padding: 34px 28px 56px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page-frame h2 {
+  font-family: var(--font-serif);
+  font-size: calc(var(--reader-font-size) * 1.25);
+  font-weight: 500;
+  line-height: 1.5;
+  margin: 8px 0 28px;
+  color: var(--reader-text);
+  flex: none;
+}
+
+.page-frame p {
+  font-family: var(--font-serif);
+  font-size: var(--reader-font-size);
+  line-height: var(--reader-line-height);
+  color: var(--reader-text);
+  margin: 0 0 1.1em;
+  text-align: justify;
+  text-indent: 2em;
+  flex: none;
+}
+
+.page-frame p.img-note {
+  font-family: var(--font-sans);
+  font-size: calc(var(--reader-font-size) * 0.72);
+  line-height: 1.6;
+  color: var(--text-muted);
+  text-indent: 0;
+  text-align: left;
+  margin: 0 0 0.9em;
+  padding: 4px 10px;
+  border-left: 2px solid var(--border);
+  background: rgba(127, 127, 127, 0.06);
+  border-radius: 0 4px 4px 0;
+}
+
+/* 分页模式去掉「上一章 / 下一章」，换成整页翻动的左右热区 */
+body[data-mode="paged"] #btn-prev,
+body[data-mode="paged"] #btn-next { display: none; }
+
+.page-indicator {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
+  text-align: center;
+}
+
+.page-indicator[hidden] { display: none; }
+
+.page-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 15%;
+  max-width: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  line-height: 1;
+  color: transparent;
+  background: none;
+  border: none;
+  cursor: pointer;
+  z-index: 5;
+  transition: color 0.15s, background 0.15s;
+}
+
+.page-edge:hover:not(:disabled) {
+  color: var(--text-muted);
+  background: rgba(127, 127, 127, 0.05);
+}
+
+.page-edge:disabled { cursor: default; }
+
+.page-edge-prev { left: 0; padding-left: 10px; justify-content: flex-start; }
+.page-edge-next { right: 0; padding-right: 10px; justify-content: flex-end; }
+
+/* 滚动模式下用不到翻页热区，避免挡住原来的滚动操作 */
+body:not([data-mode="paged"]) .page-edge { display: none; }
+
+.bar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex: none;
+  margin: 0 2px;
+}
 
 .reader-content h2 {
   font-family: var(--font-serif);
@@ -785,5 +920,8 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
 
 @media (max-width: 640px) {
   .reader-content { padding: 28px 18px 56px; }
+  .page-frame { padding: 22px 16px 40px; }
+  /* 窄屏下翻页热区太占地方，靠键盘/滑动即可 */
+  .page-edge { display: none; }
   .shelf { padding: 40px 18px 32px; }
 }

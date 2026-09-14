@@ -40,8 +40,14 @@
     <button id="btn-toc" class="icon-btn" type="button" title="目录">目录</button>
     <button id="btn-search" class="icon-btn" type="button" title="搜索正文（Ctrl+F）">搜索</button>
     <button id="btn-notes" class="icon-btn" type="button" title="我的划线（Ctrl+M）">笔记</button>
+    <button id="btn-mode" class="icon-btn" type="button" title="在滚动 / 分页之间切换">滚动</button>
+    <span class="bar-divider"></span>
     <button id="btn-font-down" class="icon-btn" type="button" title="缩小字号">A−</button>
     <button id="btn-font-up" class="icon-btn" type="button" title="放大字号">A+</button>
+    <button id="btn-line-down" class="icon-btn" type="button" title="收紧行距">行−</button>
+    <button id="btn-line-up" class="icon-btn" type="button" title="放宽行距">行+</button>
+    <button id="btn-width-down" class="icon-btn" type="button" title="收窄页宽">宽−</button>
+    <button id="btn-width-up" class="icon-btn" type="button" title="放宽页宽">宽+</button>
     <button id="btn-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
   </header>
 
@@ -74,7 +80,11 @@
     <ol id="notes-list" class="notes-list"></ol>
   </aside>
 
-  <main id="reader-content" class="reader-content" tabindex="0"></main>
+  <div id="reader-view" class="reader-view">
+    <main id="reader-content" class="reader-content" tabindex="0"></main>
+    <button id="btn-page-prev" class="page-edge page-edge-prev" type="button" title="上一页（←）" tabindex="-1">‹</button>
+    <button id="btn-page-next" class="page-edge page-edge-next" type="button" title="下一页（→）" tabindex="-1">›</button>
+  </div>
 
   <div id="hl-toolbar" class="hl-toolbar" hidden>
     <button class="hl-swatch hl-yellow" data-color="yellow" type="button" title="黄色"></button>
@@ -110,6 +120,7 @@
       </div>
       <div id="reader-status" class="foot-status">&nbsp;</div>
     </div>
+    <span id="page-indicator" class="page-indicator" hidden>1 / 1</span>
     <button id="btn-next" class="btn" type="button">下一章</button>
   </footer>
 </section>
@@ -120,6 +131,7 @@
 <script src="src/parser.js"></script>
 <script src="src/epub.js"></script>
 <script src="src/progress.js"></script>
+<script src="src/paginate.js"></script>
 <script src="src/search.js"></script>
 <script src="src/decorate.js"></script>
 <script src="src/annotations.js"></script>

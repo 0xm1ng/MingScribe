@@ -13,6 +13,7 @@
   var Parser = window.MingScribe.Parser;
   var Epub = window.MingScribe.Epub;
   var Progress = window.MingScribe.Progress;
+  var Paginate = window.MingScribe.Paginate;
   var Search = window.MingScribe.Search;
   var Decorate = window.MingScribe.Decorate;
   var Annotations = window.MingScribe.Annotations;
@@ -21,6 +22,14 @@
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
+  /** 行距档位（line-height 倍数）。中文正文多在 1.6 ~ 2.2 之间。 */
+  var LINE_STEPS = [1.55, 1.7, 1.85, 2.0, 2.15, 2.3];
+  var DEFAULT_LINE_HEIGHT = 1.85;
+  /** 页宽档位，单位 em（相对正文字号）。所以调大字号时页宽会跟着变宽。 */
+  var WIDTH_STEPS = [30, 34, 38, 42, 46, 52];
+  var DEFAULT_PAGE_WIDTH = 38;
+  var MODE_SCROLL = 'scroll';
+  var MODE_PAGED = 'paged';
   var PREFS_KEY = 'mingscribe.prefs.v1';
   var SAVE_DEBOUNCE_MS = 400;
   var SEARCH_DEBOUNCE_MS = 180;
@@ -62,7 +71,11 @@
     dragging: false,
     annotations: [],
     selection: null,
-    editingId: ''
+    editingId: '',
+    /** 分页模式下的当前页边界数组与页序号；滚动模式下不用。 */
+    pages: [],
+    pageIndex: 0,
+    resizeTimer: null
   };
 
   var el = {};
@@ -100,6 +113,62 @@
     document.documentElement.style.setProperty('--reader-font-size', clamped + 'px');
     savePrefs({ fontSize: clamped });
     return clamped;
+  }
+
+  /** 在档位表里找最接近的一档，用于把任意历史值吸附到最近档。 */
+  function nearestStepIndex(steps, value, fallback) {
+    var v = Number(value);
+    if (!v || isNaN(v)) v = fallback;
+    var best = 0;
+    var bestDiff = Infinity;
+    for (var i = 0; i < steps.length; i++) {
+      var diff = Math.abs(steps[i] - v);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    return best;
+  }
+
+  function applyLineHeight(value) {
+    var idx = nearestStepIndex(LINE_STEPS, value, DEFAULT_LINE_HEIGHT);
+    var clamped = LINE_STEPS[idx];
+    document.documentElement.style.setProperty('--reader-line-height', String(clamped));
+    savePrefs({ lineHeight: clamped });
+    return clamped;
+  }
+
+  function applyPageWidth(value) {
+    var idx = nearestStepIndex(WIDTH_STEPS, value, DEFAULT_PAGE_WIDTH);
+    var clamped = WIDTH_STEPS[idx];
+    document.documentElement.style.setProperty('--page-width', clamped + 'em');
+    savePrefs({ pageWidth: clamped });
+    return clamped;
+  }
+
+  /**
+   * 阅读模式：'scroll'（连续滚动）或 'paged'（一屏一页）。
+   * 统一挂在 body 的 data-mode 上，样式与逻辑都以它为唯一开关。
+   */
+  function applyReadingMode(mode) {
+    var value = mode === MODE_PAGED ? MODE_PAGED : MODE_SCROLL;
+    document.body.setAttribute('data-mode', value);
+    savePrefs({ readingMode: value });
+    if (el.modeBtn) {
+      el.modeBtn.textContent = value === MODE_PAGED ? '分页' : '滚动';
+      el.modeBtn.title = value === MODE_PAGED ? '当前分页模式，点击切回滚动' : '当前滚动模式，点击切到分页';
+      el.modeBtn.classList.toggle('active', value === MODE_PAGED);
+    }
+    if (el.pageIndicator) el.pageIndicator.hidden = value !== MODE_PAGED;
+    if (el.pagePrevBtn) el.pagePrevBtn.hidden = value !== MODE_PAGED;
+    if (el.pageNextBtn) el.pageNextBtn.hidden = value !== MODE_PAGED;
+    return value;
+  }
+
+  function readingMode() {
+    return document.body.getAttribute('data-mode') === MODE_PAGED ? MODE_PAGED : MODE_SCROLL;
+  }
+
+  function isPaged() {
+    return readingMode() === MODE_PAGED;
   }
 
   function applyTheme(theme) {
@@ -629,25 +698,219 @@
     state.chapterIndex = idx;
 
     el.content.innerHTML = '';
-    el.content.appendChild(buildChapterBody(chapter));
+    if (!isPaged()) el.content.appendChild(buildChapterBody(chapter));
     el.readerChapterName.textContent = chapter.title || ('第 ' + (idx + 1) + ' 节');
 
-    updateTocActive(idx);
     el.prevBtn.disabled = idx <= 0;
     el.nextBtn.disabled = idx >= total - 1;
 
-    el.content.scrollTop = 0;
-    positionAt(Math.max(0, Math.min(Number(charOffset) || 0, chapter.end - chapter.start)));
+    var anchor = Math.max(0, Math.min(Number(charOffset) || 0, chapter.end - chapter.start));
 
-    // 统一重画：搜索命中与划线都要保留，否则翻章后关键词和划线就丢了
+    if (isPaged()) {
+      // 分页模式：不滚动，改成「按锚点找到该在第几页，只渲染那一页」
+      state.pages = [];
+      state.pageIndex = 0;
+      repaginate(anchor);
+    } else {
+      el.content.scrollTop = 0;
+      positionAt(anchor);
+      // 统一重画：搜索命中与划线都要保留，否则翻章后关键词和划线就丢了
+      decorateChapter();
+      updateProgressDisplay();
+    }
+
+    scheduleSave();
+  }
+
+  /* ---------------- 分页 ---------------- */
+
+  /**
+   * 理想页容量：先用固定的平均字宽估算一屏大概能放多少个字、多少行。
+   * 只是为了拿到一个「页边界」的起点，不需要精确——真正的排版仍由 CSS 决定，
+   * 切出来的页就算比一屏多一两个字，也只会自然地流到下一页而不是被裁掉。
+   */
+  function idealMetrics() {
+    var rect = el.content.getBoundingClientRect();
+
+    /*
+     * 关键：不能直接拿 el.content 的内边距来算。
+     * 分页模式下 padding 在 .page-frame 上（34px 28px 56px），而 .reader-content 是 0；
+     * 这里直接读 .page-frame 的真实盒模型，样式改了也不用跟着改这个函数。
+     */
+    var probe = el.content.querySelector('.page-frame');
+    var frameX = 28;
+    var frameY = 34 + 56;
+
+    if (probe) {
+      var pcs = window.getComputedStyle(probe);
+      frameX = (parseFloat(pcs.paddingLeft) || 0) + (parseFloat(pcs.paddingRight) || 0);
+      frameY = (parseFloat(pcs.paddingTop) || 0) + (parseFloat(pcs.paddingBottom) || 0);
+    }
+
+    var width = Math.max(160, rect.width - frameX);
+    var height = Math.max(120, rect.height - frameY);
+
+    var fontSize = parseFloat(window.getComputedStyle(document.documentElement).getPropertyValue('--reader-font-size')) || DEFAULT_FONT_SIZE;
+    var lineHeight = parseFloat(window.getComputedStyle(document.documentElement).getPropertyValue('--reader-line-height')) || DEFAULT_LINE_HEIGHT;
+
+    return {
+      cols: Math.max(6, width / fontSize),
+      rowsPerPage: Math.max(3, height / (fontSize * lineHeight))
+    };
+  }
+
+  /**
+   * 把「可用高度」换成一行能放多少行的安全容量。
+   *
+   * 这里的 0.9 不是随手拍的：估算出的行数总会比真实能放的多一点点
+   * （标点避让、段末边距取整、字宽 0.55 的近似都会累积偏差），
+   * 留 10% 余量比事后反复重切更稳，也保证了**同样的排版参数必然切出同样的页**
+   * —— 这一点很重要，否则前后翻页会因为重切差异而回不到原页。
+   */
+  var ROWS_SAFETY = 0.9;
+
+  /** 组装切页参数。纯函数：只依赖当前 CSS 变量与容器尺寸。 */
+  function paginateOptions() {
+    var metrics = idealMetrics();
+    return {
+      cols: Math.max(4, metrics.cols),
+      rowsPerPage: Math.max(2, metrics.rowsPerPage * ROWS_SAFETY),
+      isTitle: function (t) {
+        var chapter = state.book && state.book.chapters[state.chapterIndex];
+        return !!chapter && t === chapter.title;
+      }
+    };
+  }
+
+  /**
+   * 按当前字号 / 行距 / 页宽重新切页，并把阅读位置保持在 anchor 这一处。
+   *
+   * 切页是**确定性**的：同样的排版参数 + 同样的容器尺寸 → 同样的页边界。
+   * 所以前后翻页不会因为重切而错位。
+   *
+   * @param {number} anchor  要保住的本章字符偏移（默认取当前阅读位置）
+   */
+  function repaginate(anchor) {
+    if (!state.book || !isPaged()) return;
+
+    var chapter = state.book.chapters[state.chapterIndex];
+    if (!chapter) return;
+
+    var offset = typeof anchor === 'number' && !isNaN(anchor) ? anchor : currentOffset();
+
+    state.pages = Paginate.paginateChapter(chapter, paginateOptions());
+    state.pageIndex = Paginate.pageIndexOf(state.pages, offset);
+
+    renderPage();
+  }
+
+  /** 只把当前页需要的那一段正文渲染出来。 */
+  function renderPage() {
+    if (!state.book) return;
+    var chapter = state.book.chapters[state.chapterIndex];
+    if (!chapter) return;
+
+    var pages = state.pages;
+    if (!pages.length) pages = state.pages = [{ start: 0, end: chapter.text.length }];
+    state.pageIndex = Paginate.clampPageIndex(pages, state.pageIndex);
+
+    var page = pages[state.pageIndex];
+    var source = String(chapter.text || '');
+    var slice = source.slice(page.start, page.end);
+
+    var frame = document.createElement('div');
+    frame.className = 'page-frame';
+
+    var lines = slice.split('\n');
+    var cursor = page.start;
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      var lineStart = cursor;
+      cursor += raw.length + 1;
+
+      var trimmed = raw.trim();
+      if (!trimmed) continue;
+
+      var lead = raw.length - raw.replace(/^\s+/, '').length;
+      var node;
+      if (trimmed === chapter.title) node = document.createElement('h2');
+      else if (IMAGE_NOTE_PATTERN.test(trimmed)) { node = document.createElement('p'); node.className = 'img-note'; }
+      else node = document.createElement('p');
+
+      node.setAttribute('data-off', String(lineStart + lead));
+      node.textContent = trimmed;
+      frame.appendChild(node);
+    }
+
+    el.content.innerHTML = '';
+    el.content.appendChild(frame);
+
     decorateChapter();
-
+    updatePageIndicator();
     updateProgressDisplay();
+  }
+
+  function updatePageIndicator() {
+    if (!el.pageIndicator) return;
+    if (!isPaged()) { el.pageIndicator.hidden = true; return; }
+    el.pageIndicator.hidden = false;
+    el.pageIndicator.textContent = (state.pageIndex + 1) + ' / ' + Math.max(1, state.pages.length);
+    if (el.pagePrevBtn) el.pagePrevBtn.disabled = state.pageIndex <= 0;
+    if (el.pageNextBtn) el.pageNextBtn.disabled = state.pageIndex >= state.pages.length - 1;
+  }
+
+  /** 翻 n 页；越界时跨到相邻章节的首页 / 末页。 */
+  function stepPage(delta) {
+    if (!state.book) return;
+    if (!isPaged()) {
+      // 滚动模式下退化成「滚一屏」，保持手感一致
+      var viewport = el.content.clientHeight;
+      el.content.scrollTop += (delta > 0 ? 1 : -1) * viewport * 0.9;
+      return;
+    }
+
+    var target = state.pageIndex + delta;
+
+    if (target < 0) {
+      // 已经是本章第一页 → 跳上一章的最后一页
+      if (state.chapterIndex <= 0) return;
+      renderChapter(state.chapterIndex - 1, 0);
+      state.pageIndex = state.pages.length - 1;
+      renderPage();
+      hideToolbar();
+      scheduleSave();
+      return;
+    }
+
+    if (target >= state.pages.length) {
+      // 已经是本章最后一页 → 跳下一章的第一页
+      if (state.chapterIndex >= state.book.chapters.length - 1) return;
+      renderChapter(state.chapterIndex + 1, 0);
+      return;
+    }
+
+    state.pageIndex = target;
+    hideToolbar();
+    renderPage();
+    scheduleSave();
+  }
+
+  /** 跳到本章第一页 / 最后一页。 */
+  function gotoPageEdge(which) {
+    if (!state.book || !isPaged()) return;
+    state.pageIndex = which === 'end' ? state.pages.length - 1 : 0;
+    hideToolbar();
+    renderPage();
     scheduleSave();
   }
 
   /** 滚动到本章内指定字符偏移所在的段落。 */
   function positionAt(offset) {
+    if (isPaged()) {
+      repaginate(offset, true);
+      return;
+    }
+
     var nodes = el.content.querySelectorAll('[data-off]');
     var target = null;
 
@@ -659,8 +922,13 @@
     el.content.scrollTop = target && target !== nodes[0] ? target.offsetTop : 0;
   }
 
-  /** 当前视口顶部对应的本章字符偏移。 */
+  /** 当前阅读位置对应的本章字符偏移（分页模式下即当前页的第一个字）。 */
   function currentOffset() {
+    if (isPaged()) {
+      var page = state.pages[state.pageIndex];
+      return page ? page.start : 0;
+    }
+
     var nodes = el.content.querySelectorAll('[data-off]');
     if (!nodes.length) return 0;
 
@@ -1345,6 +1613,34 @@
     renderChapter(target, 0);
   }
 
+  /**
+   * 改字号 / 行距 / 页宽后重新排版，并把阅读位置钉回原来的那一处。
+   *
+   * 关键点：先取 anchor（当前阅读位置的字符偏移），再改样式，
+   * 等下一帧浏览器完成重排后按 anchor 重新切页 / 定位。
+   * 这样无论排版参数怎么变，读者看到的都还是同一段话。
+   */
+  function relayout(anchor) {
+    if (!state.book) return;
+    if (isPaged()) {
+      requestAnimationFrame(function () {
+        repaginate(anchor);
+        updatePageIndicator();
+      });
+    } else {
+      requestAnimationFrame(function () {
+        positionAt(anchor);
+        updateProgressDisplay();
+      });
+    }
+  }
+
+  /** 在某个档位表里上/下走一格，并返回新值。 */
+  function stepIn(steps, current, fallback, delta) {
+    var idx = nearestStepIndex(steps, current, fallback);
+    return steps[Math.max(0, Math.min(idx + delta, steps.length - 1))];
+  }
+
   function stepFont(delta) {
     var current = Number(loadPrefs().fontSize) || DEFAULT_FONT_SIZE;
     var next = FONT_STEPS[Math.max(0, Math.min(nearestFontIndex(current) + delta, FONT_STEPS.length - 1))];
@@ -1354,13 +1650,69 @@
     }
     var anchor = currentOffset();
     applyFontSize(next);
-    if (state.book) {
-      requestAnimationFrame(function () {
-        positionAt(anchor);
-        updateProgressDisplay();
-      });
-    }
+    // 字号变了，一屏能放的字也变了，必须重新切页
+    relayout(anchor);
     toast('字号 ' + next + 'px');
+  }
+
+  function stepLineHeight(delta) {
+    var current = Number(loadPrefs().lineHeight) || DEFAULT_LINE_HEIGHT;
+    var next = stepIn(LINE_STEPS, current, DEFAULT_LINE_HEIGHT, delta);
+    if (next === current) {
+      toast('已到行距极限');
+      return;
+    }
+    var anchor = currentOffset();
+    applyLineHeight(next);
+    relayout(anchor);
+    toast('行距 ' + next);
+  }
+
+  function stepPageWidth(delta) {
+    var current = Number(loadPrefs().pageWidth) || DEFAULT_PAGE_WIDTH;
+    var next = stepIn(WIDTH_STEPS, current, DEFAULT_PAGE_WIDTH, delta);
+    if (next === current) {
+      toast('已到页宽极限');
+      return;
+    }
+    var anchor = currentOffset();
+    applyPageWidth(next);
+    relayout(anchor);
+    toast(isPaged() ? '页宽 ' + next + ' 字' : '页宽 ' + next + 'em（切到分页模式更明显）');
+  }
+
+  /** 滚动 ⇄ 分页。切换时必须保住阅读位置。 */
+  function toggleReadingMode() {
+    if (!state.book) {
+      // 还没打开书也允许切，偏好会记住
+      var value = isPaged() ? MODE_SCROLL : MODE_PAGED;
+      applyReadingMode(value);
+      toast(value === MODE_PAGED ? '已切到分页模式' : '已切回滚动模式');
+      return;
+    }
+
+    var anchor = currentOffset();
+    var next = isPaged() ? MODE_SCROLL : MODE_PAGED;
+
+    applyReadingMode(next);
+
+    if (next === MODE_PAGED) {
+      // 从滚动切到分页：清掉滚动带来的残留，再按锚点切页
+      state.pages = [];
+      state.pageIndex = 0;
+      el.content.scrollTop = 0;
+      requestAnimationFrame(function () {
+        repaginate(anchor);
+        updatePageIndicator();
+      });
+      toast('已切到分页模式：← → 翻页，PageUp / PageDown 也可以');
+    } else {
+      // 从分页切回滚动：整章重新渲染，再滚到锚点
+      requestAnimationFrame(function () {
+        renderChapter(state.chapterIndex, anchor);
+      });
+      toast('已切回滚动模式');
+    }
   }
 
   /* ---------------- 事件绑定 ---------------- */
@@ -1408,29 +1760,32 @@
       }
     }
 
-    var viewport = el.content.clientHeight;
-
     switch (event.key) {
       case 'ArrowLeft':
-        goChapter(-1);
+        // 分页模式左键 = 上一页；滚动模式保留原来的「上一章」
+        if (isPaged()) stepPage(-1);
+        else goChapter(-1);
         break;
       case 'ArrowRight':
-        goChapter(1);
+        if (isPaged()) stepPage(1);
+        else goChapter(1);
         break;
       case 'PageDown':
       case ' ':
-        el.content.scrollTop += viewport * 0.9;
+        // stepPage 在滚动模式下会自己退化成「滚一屏」
+        stepPage(1);
         break;
       case 'PageUp':
-        el.content.scrollTop -= viewport * 0.9;
+        stepPage(-1);
         break;
       case 'Home':
-        el.content.scrollTop = 0;
+        if (isPaged()) gotoPageEdge('start');
+        else el.content.scrollTop = 0;
         break;
       case 'End':
-        el.content.scrollTop = el.content.scrollHeight;
+        if (isPaged()) gotoPageEdge('end');
+        else el.content.scrollTop = el.content.scrollHeight;
         break;
-      case 'Escape':
         // 一次 Esc 只关一层：批注弹层 → 划线工具条 → 搜索面板 → 笔记面板 → 目录
         if (!el.notePopover.hidden) closeNoteEditor();
         else if (!el.hlToolbar.hidden) { hideToolbar(); clearSelection(); }
@@ -1491,6 +1846,11 @@
 
     el.fontUpBtn.addEventListener('click', function () { stepFont(1); });
     el.fontDownBtn.addEventListener('click', function () { stepFont(-1); });
+    el.lineUpBtn.addEventListener('click', function () { stepLineHeight(1); });
+    el.lineDownBtn.addEventListener('click', function () { stepLineHeight(-1); });
+    el.widthUpBtn.addEventListener('click', function () { stepPageWidth(1); });
+    el.widthDownBtn.addEventListener('click', function () { stepPageWidth(-1); });
+    el.modeBtn.addEventListener('click', toggleReadingMode);
     el.themeBtn.addEventListener('click', function () {
       var next = document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       applyTheme(next);
@@ -1498,10 +1858,16 @@
     });
 
     el.content.addEventListener('scroll', function () {
+      // 分页模式下内容不滚动，这个监听只在滚动模式下有意义
+      if (isPaged()) return;
       hideToolbar();
       updateProgressDisplay();
       scheduleSave();
     });
+
+    // 分页模式的翻页热区（左右两侧边缘）
+    if (el.pagePrevBtn) el.pagePrevBtn.addEventListener('click', function () { stepPage(-1); el.content.focus(); });
+    if (el.pageNextBtn) el.pageNextBtn.addEventListener('click', function () { stepPage(1); el.content.focus(); });
 
     /* 进度条：按下拖动预览，松手跳转 */
     el.progressBar.addEventListener('pointerdown', function (event) {
@@ -1658,6 +2024,16 @@
     });
 
     document.addEventListener('keydown', onKeyDown);
+
+    // 窗口大小变了，一屏能放的字也变了 —— 分页模式下必须重新切页，
+    // 否则会把内容裁掉或留一大片空白。滚动模式不用管，浏览器自己会重排。
+    window.addEventListener('resize', function () {
+      if (state.resizeTimer) clearTimeout(state.resizeTimer);
+      state.resizeTimer = setTimeout(function () {
+        if (!state.book || !isPaged()) return;
+        repaginate(currentOffset());
+      }, 160);
+    });
     window.addEventListener('beforeunload', flushSave);
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') flushSave();
@@ -1676,6 +2052,10 @@
     el.readerBookName = $('reader-book-name');
     el.readerChapterName = $('reader-chapter-name');
     el.content = $('reader-content');
+    el.readerView = $('reader-view');
+    el.pagePrevBtn = $('btn-page-prev');
+    el.pageNextBtn = $('btn-page-next');
+    el.pageIndicator = $('page-indicator');
     el.toc = $('toc');
     el.tocList = $('toc-list');
     el.tocBtn = $('btn-toc');
@@ -1685,6 +2065,11 @@
     el.nextBtn = $('btn-next');
     el.fontUpBtn = $('btn-font-up');
     el.fontDownBtn = $('btn-font-down');
+    el.lineUpBtn = $('btn-line-up');
+    el.lineDownBtn = $('btn-line-down');
+    el.widthUpBtn = $('btn-width-up');
+    el.widthDownBtn = $('btn-width-down');
+    el.modeBtn = $('btn-mode');
     el.themeBtn = $('btn-theme');
     el.progressBar = $('progress-bar');
     el.progressFill = $('progress-fill');
@@ -1729,8 +2114,13 @@
     bindEvents();
 
     var prefs = loadPrefs();
+    // 先定排版参数（字号 → 行距 → 页宽），再定模式：
+    // 模式切换会立刻按这些参数切一次页，顺序反了就会用旧尺寸切。
     applyFontSize(prefs.fontSize || DEFAULT_FONT_SIZE);
+    applyLineHeight(prefs.lineHeight || DEFAULT_LINE_HEIGHT);
+    applyPageWidth(prefs.pageWidth || DEFAULT_PAGE_WIDTH);
     applyTheme(prefs.theme || 'light');
+    applyReadingMode(prefs.readingMode || MODE_SCROLL);
 
     renderShelf();
     initCache(function () {
