@@ -14,10 +14,11 @@
     <p class="sub">极简电子书阅读器 · MVP</p>
   </header>
 
-  <button id="btn-open-file" class="btn btn-primary btn-block" type="button">选择 TXT / EPUB 文件</button>
-  <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip" hidden />
+  <button id="btn-open-file" class="btn btn-primary btn-block" type="button">选择电子书文件</button>
+  <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip,.mobi,.azw,.azw3,.kfx,.doc,.docx,.rtf,.odt,.html,.htm,.fb2,.lit,.pdb,.prc,.snb,.cbr,.cbz" hidden />
   <p class="hint">
-    支持 TXT（自动识别 UTF-8 / GB18030 编码）与 EPUB 电子书。<br />
+    网页版支持 TXT（自动识别 UTF-8 / GB18030 编码）与 EPUB 电子书。<br />
+    <strong>桌面版</strong>还可在内部经 Calibre 转换后直接打开 MOBI / AZW3 / DOCX / FB2 等格式。<br />
     首次选择后会自动记住这本书，下次在书架上点一下直接继续阅读。<br />
     文件仅在你的浏览器本地读取，不会上传到任何服务器。
   </p>
@@ -131,6 +132,8 @@
 <script src="src/encoding.js"></script>
 <script src="src/parser.js"></script>
 <script src="src/epub.js"></script>
+<script src="src/convert.js"></script>
+<script src="src/tauri-bridge.js"></script>
 <script src="src/progress.js"></script>
 <script src="src/paginate.js"></script>
 <script src="src/search.js"></script>

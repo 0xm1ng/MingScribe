@@ -19,6 +19,7 @@
   var Annotations = window.MingScribe.Annotations;
   var Exporter = window.MingScribe.Exporter;
   var BookStore = window.MingScribe.BookStore;
+  var Convert = window.MingScribe.Convert;
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
@@ -569,6 +570,12 @@
       return;
     }
 
+    // 其他格式（MOBI / AZW3 / DOCX / FB2 …）走 Calibre→EPUB 转换管道，仅桌面版可用
+    if (Convert.isConvertible(file.name)) {
+      ingestViaConversion(file, meta, handle || null);
+      return;
+    }
+
     readFileToText(file).then(function (text) {
       ingest(text, meta, handle || null);
     }, function () {
@@ -632,6 +639,39 @@
       openBook(book, meta);
     }, function (err) {
       toast('EPUB 打开失败：' + (err && err.message ? err.message : '未知错误'));
+    });
+  }
+
+  /** 取桌面版注入的转换后端；网页版未注入则返回 null（此时不应触发转换）。 */
+  function getConvertBackend() {
+    return (typeof window !== 'undefined' && window.MingScribeConvert) ? window.MingScribeConvert : null;
+  }
+
+  function fileExt(name) {
+    var m = /\.([a-z0-9]+)$/i.exec(name || '');
+    return m ? m[1].toLowerCase() : '';
+  }
+
+  /**
+   * 非原生格式：经桌面版转换后端转成 EPUB，再走标准 EPUB 入口（ingestEpub）。
+   * 这样 progress / search / decorate / annotations 全部复用，零返工。
+   *
+   * 网页版没有转换后端时，给友好提示并中止，不会崩溃。
+   */
+  function ingestViaConversion(file, meta, handle) {
+    var backend = getConvertBackend();
+    if (!backend || typeof backend.convert !== 'function') {
+      toast('当前是网页版，暂不支持 .' + (fileExt(file.name) || '该').toUpperCase() +
+        ' 格式。请使用桌面版（内置 Calibre 转换），或先转成 EPUB / TXT 再导入。');
+      return;
+    }
+
+    toast('正在把《' + meta.title + '》转换为 EPUB…', true);
+    Promise.resolve(backend.convert(file)).then(function (epubBuffer) {
+      if (!epubBuffer) throw new Error('转换未产出 EPUB 文件');
+      ingestEpub(epubBuffer, meta, handle);
+    }, function (err) {
+      toast('转换失败：' + (err && err.message ? err.message : '未检测到 Calibre，或文件已加密 / 损坏'));
     });
   }
 
