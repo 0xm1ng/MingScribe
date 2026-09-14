@@ -1,5 +1,10 @@
 # MingScribe
 
+[![CI](https://github.com/Ethan-bot-coder/MingScribe/actions/workflows/ci.yml/badge.svg)](https://github.com/Ethan-bot-coder/MingScribe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)](#运行测试)
+[![Zero runtime deps](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#依赖原则)
+
 一个**纯前端、零依赖**的电子书阅读器，外加一个可选的**桌面壳**。
 
 - **网页版**：双击 `index.html` 就能用，不需要装任何东西、不需要起服务器、不需要联网。读 TXT 与 EPUB。
@@ -287,7 +292,11 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-产物在 `src-tauri/target/release/bundle/`。
+`beforeBuildCommand` 会先跑 `tools/build_frontend.js`，把 `index.html` 与 `src/` 复制到 `dist/`
+（该目录不入库），桌面版只嵌入这个目录。**不要**把 `frontendDist` 改回项目根：Tauri 会递归嵌入
+其下的全部文件，把 `node_modules/`、`.git/`、`src-tauri/target/` 一起塞进安装包。
+
+产物在 `src-tauri/target/release/bundle/`（`nsis` 安装程序与 `msi` 包）。
 
 ### 支持格式表
 
