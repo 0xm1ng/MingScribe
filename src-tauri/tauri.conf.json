@@ -10,6 +10,7 @@
     "frontendDist": "../"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "MingScribe",
