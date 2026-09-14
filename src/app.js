@@ -644,7 +644,9 @@
 
   /** 取桌面版注入的转换后端；网页版未注入则返回 null（此时不应触发转换）。 */
   function getConvertBackend() {
-    return (typeof window !== 'undefined' && window.MingScribeConvert) ? window.MingScribeConvert : null;
+    if (typeof window === 'undefined') return null;
+    var win = window;
+    return win.MingScribeConvert || null;
   }
 
   function fileExt(name) {

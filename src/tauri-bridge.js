@@ -46,7 +46,8 @@
     .then(function (mods) {
       var invoke = mods[0].invoke;
 
-      MingScribe.MingScribeConvert = {
+      // app.js 的 getConvertBackend 读取 window.MingScribeConvert；同时保留旧位置兼容
+      root.MingScribeConvert = MingScribe.MingScribeConvert = {
         convert: function (file) {
           if (!file || typeof file.arrayBuffer !== 'function') {
             return Promise.reject(new Error('无效的文件对象'));
