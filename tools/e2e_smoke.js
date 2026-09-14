@@ -482,6 +482,15 @@ function sizeOf(p) {
   // 切到分页
   await page.click('#btn-mode');
   await page.waitForTimeout(600);
+
+  // 宽屏下分页默认对开（双页）。第 16 段只验证单页语义（行距 / 页宽按钮 /
+  // 刷新恢复 / 切回滚动），这里先切回单页，双页专门留给第 17 段。
+  var spreadNow = await page.evaluate(() => document.getElementById('btn-spread').textContent.trim());
+  if (spreadNow === '双页') {
+    await page.click('#btn-spread');
+    await page.waitForTimeout(400);
+  }
+
   const paged = await page.evaluate(() => ({
     mode: document.body.getAttribute('data-mode'),
     chapter: document.getElementById('reader-chapter-name').textContent,
