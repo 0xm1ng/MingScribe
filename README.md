@@ -121,7 +121,7 @@ npm test
 node --test tests/*.test.js
 ```
 
-当前：**170 个测试（169 通过 / 0 失败 / 1 跳过）。**
+当前：**178 个测试（177 通过 / 0 失败 / 1 跳过）。**
 
 > 跳过的 1 项是 `CTF-All-In-One` 电子书校验——该文件被 Windows Defender 阻断，需用户手动恢复后才会重新纳入校验。详见「测试电子书素材」一节。
 
@@ -233,6 +233,41 @@ npm run ebooks:check    # 抽查内容质量
 14. **同一条划线不能重叠。** 如果新选的范围和已有划线相交，会提示先删掉旧的，而不是自动合并。这是有意的取舍：合并后批注归属谁、颜色听谁的都没有明确答案，宁可让用户明确操作。
 15. **划线记的是字符区间，不是视觉位置。** 如果换了一个文字内容不同的文件（即使文件名和大小相同），划线会错位。为此每条划线都冗余保存了原文，导出时以保存的原文为准。
 16. **双页对开是「一屏两页」，不是版面级双栏。** 双页下每个页框仍是独立整页，切页算法与字符锚点完全不变，翻页一次前进/后退一对（2 页）。当容器宽度不足（< 720px）或窗口被缩得太窄时，会自动降级回单页渲染，避免字被压得过小；尾章若页数为奇数，右页会留白占位以保持版心对称。
+
+## 桌面版与多格式支持
+
+网页版原生支持 `.txt` 与 `.epub`。桌面版（Tauri + Rust）额外引入 Calibre 的 `ebook-convert`，把 MOBI / AZW3 / DOCX / FB2 / RTF / ODT / HTML / CBZ / CBR 等转成 EPUB 后再走同一套阅读流程，因此划线、搜索、进度、分页等能力零改动即可复用。
+
+### 本机构建步骤
+
+前置要求：
+- 安装 [Rust](https://www.rust-lang.org/tools/install)（`cargo` 在 PATH）
+- 安装 [Calibre](https://calibre-ebook.com/download)（`ebook-convert` 在 PATH）
+- 在项目根目录执行：
+
+```bash
+cd D:\MingScribe
+npm install
+npm run tauri:dev
+```
+
+> 第一次 `npm install` 会下载 `@tauri-apps/cli` 与 `@tauri-apps/api`；第一次 `tauri dev` 会编译 Rust 侧，耗时几分钟。
+
+打包发布：
+
+```bash
+npm run tauri:build
+```
+
+产物在 `src-tauri/target/release/bundle/`。
+
+### 支持格式表
+
+| 格式 | 处理方式 | 说明 |
+|---|---|---|
+| TXT / EPUB | 原生解析 | 网页版与桌面版都支持 |
+| MOBI / AZW3 / DOCX / FB2 / RTF / ODT / HTML / CBZ / CBR | 桌面版调 `ebook-convert` 转 EPUB | 依赖 Calibre；带 DRM 的 AZW3/MOBI 会转换失败 |
+| PDF | **不支持** | 固定版式，转 EPUB 必乱版；需单独 PDF 阅读视图（见下） |
 
 ## PDF 支持路线图（规划中）
 

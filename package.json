@@ -7,7 +7,16 @@
     "test": "node --test tests/*.test.js",
     "ebooks": "python tools/build_ebooks.py",
     "ebooks:check": "python tools/sample_check.py",
-    "convert:check": "node tools/convert_check.js"
+    "convert:check": "node tools/convert_check.js",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
   },
   "keywords": [
     "ebook",
