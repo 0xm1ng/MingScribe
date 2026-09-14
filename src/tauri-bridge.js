@@ -41,28 +41,37 @@
     return bytes.buffer;
   }
 
-  // 动态 import，避免网页版因缺少 @tauri-apps/api 而报错（此处已被 isTauri 守卫）
-  Promise.all([import('@tauri-apps/api/core')])
-    .then(function (mods) {
-      var invoke = mods[0].invoke;
+  // 取 Tauri 全局 invoke：
+  //   - v2 withGlobalTauri=true 暴露 window.__TAURI__.core.invoke
+  //   - v2 内部实现也可能用 window.__TAURI_INTERNALS__
+  // 这里不用 ES Module import，因为纯静态页面没有打包器，浏览器无法解析 bare specifier。
+  function getTauriInvoke() {
+    var tauri = root.__TAURI__ || root.__TAURI_INTERNALS__;
+    if (!tauri) return null;
+    if (tauri.core && typeof tauri.core.invoke === 'function') return tauri.core.invoke;
+    if (typeof tauri.invoke === 'function') return tauri.invoke;
+    return null;
+  }
 
-      // app.js 的 getConvertBackend 读取 window.MingScribeConvert；同时保留旧位置兼容
-      root.MingScribeConvert = MingScribe.MingScribeConvert = {
-        convert: function (file) {
-          if (!file || typeof file.arrayBuffer !== 'function') {
-            return Promise.reject(new Error('无效的文件对象'));
-          }
-          var ext = (String(file.name).split('.').pop() || 'bin').toLowerCase();
-          return file.arrayBuffer().then(function (buf) {
-            var inputB64 = bytesToBase64(new Uint8Array(buf));
-            return invoke('convert_to_epub', { inputB64: inputB64, inputExt: ext });
-          }).then(function (epubB64) {
-            return base64ToArrayBuffer(epubB64);
-          });
-        }
-      };
-    })
-    .catch(function (err) {
-      console.warn('[MingScribe] Tauri 转换后端加载失败：', err);
-    });
+  var invoke = getTauriInvoke();
+  if (!invoke) {
+    console.warn('[MingScribe] 检测到 Tauri 全局对象，但未找到 invoke 方法');
+    return;
+  }
+
+  // app.js 的 getConvertBackend 读取 window.MingScribeConvert；同时保留旧位置兼容
+  root.MingScribeConvert = MingScribe.MingScribeConvert = {
+    convert: function (file) {
+      if (!file || typeof file.arrayBuffer !== 'function') {
+        return Promise.reject(new Error('无效的文件对象'));
+      }
+      var ext = (String(file.name).split('.').pop() || 'bin').toLowerCase();
+      return file.arrayBuffer().then(function (buf) {
+        var inputB64 = bytesToBase64(new Uint8Array(buf));
+        return invoke('convert_to_epub', { inputB64: inputB64, inputExt: ext });
+      }).then(function (epubB64) {
+        return base64ToArrayBuffer(epubB64);
+      });
+    }
+  };
 })();
