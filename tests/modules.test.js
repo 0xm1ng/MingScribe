@@ -58,7 +58,7 @@ test('index.html 引入了全部解析层与界面脚本，且 app.js 最后加�
 
 test('每个非 app 脚本都在浏览器环境下暴露了模块', () => {
   const scripts = SCRIPT_SRCS.filter((src) => !/app\.js$/.test(src));
-  assert.ok(scripts.length >= 12, '引入的脚本数量异常：' + scripts.length);
+  assert.ok(scripts.length >= 13, '引入的脚本数量异常：' + scripts.length);
 
   const providers = new Set(Object.values(PRODUCED));
   scripts.forEach((src) => {

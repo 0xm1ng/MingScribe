@@ -21,6 +21,7 @@
   var BookStore = window.MingScribe.BookStore;
   var Convert = window.MingScribe.Convert;
   var Updater = window.MingScribe.Updater;
+  var ReadingPrefs = window.MingScribe.ReadingPrefs;
   var TauriBridge = window.MingScribe.TauriBridge;
 
   /**
@@ -121,10 +122,53 @@
     return best;
   }
 
-  function applyFontSize(size) {
+  /**
+   * 排版类偏好要「按书记忆」，所以持久化统一走这里：
+   * 正在读书时写入本书（同时同步全局，作为之后新书的默认值）；不在书里时只写全局。
+   */
+  function persistTypo(patch) {
+    var key = state.meta && state.meta.key ? state.meta.key : '';
+    var prefs = ReadingPrefs.merge(loadPrefs(), key, patch);
+    try { storage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (err) { /* 忽略写入失败 */ }
+    return prefs;
+  }
+
+  /** 当前这本书的 key；没在读书时返回空串（表示只看全局）。 */
+  function currentBookKey() {
+    return state.meta && state.meta.key ? state.meta.key : '';
+  }
+
+  /**
+   * 把当前这本书的排版应用到页面上（只改 CSS 变量，**不写回偏好**）。
+   * 必须只读——否则每打开一本没调过的书都会凭空生成一条本书记录，
+   * 之后它就再也不会跟随全局了。
+   */
+  /** 当前这本书「理应使用」的排版值（本书 → 全局 → 默认）。 */
+  function currentTypo() {
+    return ReadingPrefs.resolve(loadPrefs(), currentBookKey(), {
+      fontSize: DEFAULT_FONT_SIZE,
+      lineHeight: DEFAULT_LINE_HEIGHT,
+      pageWidth: DEFAULT_PAGE_WIDTH
+    });
+  }
+
+  function applyBookTypo() {
+    var resolved = currentTypo();
+    paintFontSize(resolved.fontSize);
+    paintLineHeight(resolved.lineHeight);
+    paintPageWidth(resolved.pageWidth);
+    return resolved;
+  }
+
+  function paintFontSize(size) {
     var clamped = Math.max(FONT_STEPS[0], Math.min(Number(size) || DEFAULT_FONT_SIZE, FONT_STEPS[FONT_STEPS.length - 1]));
     document.documentElement.style.setProperty('--reader-font-size', clamped + 'px');
-    savePrefs({ fontSize: clamped });
+    return clamped;
+  }
+
+  function applyFontSize(size) {
+    var clamped = paintFontSize(size);
+    persistTypo({ fontSize: clamped });
     return clamped;
   }
 
@@ -141,19 +185,27 @@
     return best;
   }
 
-  function applyLineHeight(value) {
-    var idx = nearestStepIndex(LINE_STEPS, value, DEFAULT_LINE_HEIGHT);
-    var clamped = LINE_STEPS[idx];
+  function paintLineHeight(value) {
+    var clamped = LINE_STEPS[nearestStepIndex(LINE_STEPS, value, DEFAULT_LINE_HEIGHT)];
     document.documentElement.style.setProperty('--reader-line-height', String(clamped));
-    savePrefs({ lineHeight: clamped });
+    return clamped;
+  }
+
+  function applyLineHeight(value) {
+    var clamped = paintLineHeight(value);
+    persistTypo({ lineHeight: clamped });
+    return clamped;
+  }
+
+  function paintPageWidth(value) {
+    var clamped = WIDTH_STEPS[nearestStepIndex(WIDTH_STEPS, value, DEFAULT_PAGE_WIDTH)];
+    document.documentElement.style.setProperty('--page-width', clamped + 'em');
     return clamped;
   }
 
   function applyPageWidth(value) {
-    var idx = nearestStepIndex(WIDTH_STEPS, value, DEFAULT_PAGE_WIDTH);
-    var clamped = WIDTH_STEPS[idx];
-    document.documentElement.style.setProperty('--page-width', clamped + 'em');
-    savePrefs({ pageWidth: clamped });
+    var clamped = paintPageWidth(value);
+    persistTypo({ pageWidth: clamped });
     return clamped;
   }
 
@@ -701,6 +753,9 @@
     state.book = book;
     state.meta = meta;
     state.annotations = annotationStore.list(meta.key);
+    // 必须在 renderChapter 之前：这本书自己的字号/行距/页宽会决定一屏能放多少字。
+    // 晚一步就会用上一本书的排版切页，再被重切一次，白费一次渲染。
+    applyBookTypo();
 
     var saved = store.get(meta.key);
     var target = saved
@@ -1800,8 +1855,13 @@
     return steps[Math.max(0, Math.min(idx + delta, steps.length - 1))];
   }
 
+  /** 本书是否正在使用独立排版（用于提示语里加「仅本书」）。 */
+  function perBookSuffix() {
+    return state.meta ? '（仅本书）' : '';
+  }
+
   function stepFont(delta) {
-    var current = Number(loadPrefs().fontSize) || DEFAULT_FONT_SIZE;
+    var current = Number(currentTypo().fontSize) || DEFAULT_FONT_SIZE;
     var next = FONT_STEPS[Math.max(0, Math.min(nearestFontIndex(current) + delta, FONT_STEPS.length - 1))];
     if (next === current) {
       toast('已到字号极限');
@@ -1811,11 +1871,11 @@
     applyFontSize(next);
     // 字号变了，一屏能放的字也变了，必须重新切页
     relayout(anchor);
-    toast('字号 ' + next + 'px');
+    toast('字号 ' + next + 'px' + perBookSuffix());
   }
 
   function stepLineHeight(delta) {
-    var current = Number(loadPrefs().lineHeight) || DEFAULT_LINE_HEIGHT;
+    var current = Number(currentTypo().lineHeight) || DEFAULT_LINE_HEIGHT;
     var next = stepIn(LINE_STEPS, current, DEFAULT_LINE_HEIGHT, delta);
     if (next === current) {
       toast('已到行距极限');
@@ -1824,11 +1884,11 @@
     var anchor = currentOffset();
     applyLineHeight(next);
     relayout(anchor);
-    toast('行距 ' + next);
+    toast('行距 ' + next + perBookSuffix());
   }
 
   function stepPageWidth(delta) {
-    var current = Number(loadPrefs().pageWidth) || DEFAULT_PAGE_WIDTH;
+    var current = Number(currentTypo().pageWidth) || DEFAULT_PAGE_WIDTH;
     var next = stepIn(WIDTH_STEPS, current, DEFAULT_PAGE_WIDTH, delta);
     if (next === current) {
       toast('已到页宽极限');
@@ -1837,7 +1897,25 @@
     var anchor = currentOffset();
     applyPageWidth(next);
     relayout(anchor);
-    toast(isPaged() ? '页宽 ' + next + ' 字' : '页宽 ' + next + 'em（切到分页模式更明显）');
+    toast((isPaged() ? '页宽 ' + next + ' 字' : '页宽 ' + next + 'em（切到分页模式更明显）') + perBookSuffix());
+  }
+
+  /** 丢弃本书的独立排版，让它重新跟随全局设置。 */
+  function resetBookTypo() {
+    if (!state.meta) {
+      toast('打开书后才能调整该书的排版');
+      return;
+    }
+    if (!ReadingPrefs.isCustomized(loadPrefs(), state.meta.key)) {
+      toast('本书已经是默认排版');
+      return;
+    }
+    var next = ReadingPrefs.resetBook(loadPrefs(), state.meta.key);
+    try { storage.setItem(PREFS_KEY, JSON.stringify(next)); } catch (err) { /* 忽略写入失败 */ }
+    var anchor = currentOffset();
+    applyBookTypo();
+    relayout(anchor);
+    toast('已恢复默认排版');
   }
 
   /** 单页 ⇄ 双页对开；首次手动切换会锁定选择，不再随屏幕宽度自动变。 */
@@ -2061,6 +2139,7 @@
     el.lineDownBtn.addEventListener('click', function () { stepLineHeight(-1); });
     el.widthUpBtn.addEventListener('click', function () { stepPageWidth(1); });
     el.widthDownBtn.addEventListener('click', function () { stepPageWidth(-1); });
+    if (el.typoResetBtn) el.typoResetBtn.addEventListener('click', resetBookTypo);
     el.modeBtn.addEventListener('click', toggleReadingMode);
     if (el.spreadBtn) el.spreadBtn.addEventListener('click', toggleSpread);
     el.themeBtn.addEventListener('click', function () {
@@ -2293,6 +2372,7 @@
     el.modeBtn = $('btn-mode');
     el.spreadBtn = $('btn-spread');
     el.themeBtn = $('btn-theme');
+    el.typoResetBtn = $('btn-typo-reset');
     el.progressBar = $('progress-bar');
     el.progressFill = $('progress-fill');
     el.progressKnob = $('progress-knob');
@@ -2387,9 +2467,9 @@
     var prefs = loadPrefs();
     // 先定排版参数（字号 → 行距 → 页宽），再定模式与对开：
     // 模式切换会立刻按这些参数切一次页，顺序反了就会用旧尺寸切。
-    applyFontSize(prefs.fontSize || DEFAULT_FONT_SIZE);
-    applyLineHeight(prefs.lineHeight || DEFAULT_LINE_HEIGHT);
-    applyPageWidth(prefs.pageWidth || DEFAULT_PAGE_WIDTH);
+    // 应用全局排版（此时还没打开书，currentBookKey() 为空串，等价于取全局值）。
+    // 用 applyBookTypo 而不是逐个 apply*：前者只读不写，不会在启动时凭空固化默认值。
+    applyBookTypo();
     applyTheme(prefs.theme || 'light');
     applyReadingMode(prefs.readingMode || MODE_SCROLL);
     // 对开偏好：null = 跟随屏幕宽度自动；true/false = 用户手动锁定
