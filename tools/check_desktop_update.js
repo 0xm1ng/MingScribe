@@ -11,6 +11,10 @@
  *
  * 注意：最后一步会真的调用 open_url 打开 https://example.com，
  * 所以跑完请手动关掉弹出的那个标签页。
+ *
+ * 排错：若只列得出 about:blank、找不到 tauri.localhost 页面，多半是本机 WebView2 用户数据
+ * 目录坏了（反复 `taskkill /F` 容易触发，表现为「进程活着但不出窗口」）。此时**重命名**
+ * `%LOCALAPPDATA%\com.mingscribe.reader\EBWebView` 让它重建即可——别删，里面存着本地书架数据。
  */
 const { spawn } = require('child_process');
 const path = require('path');
@@ -41,9 +45,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   if (!up) { console.error('调试端口没开起来（可能已有一个实例在跑）'); child.kill(); process.exit(1); }
 
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
   const ctx = browser.contexts()[0];
-  const page = ctx.pages()[0] || await ctx.newPage();
+  // 注意：ctx.pages()[0] 不保证就是应用页面，很可能是个 about:blank，
+  // 必须按 url 挑并在一定时间内轮询等待（webview 起得比进程慢）。
+  let page = null;
+  for (let i = 0; i < 20 && !page; i++) {
+    page = ctx.pages().find((p) => p.url().includes('tauri.localhost')) || null;
+    if (!page) await sleep(1000);
+  }
+  if (!page) {
+    console.error('没找到应用页面（桌面版窗口没起来？可能是 WebView2 数据目录残留，见下方说明）');
+    child.kill();
+    await browser.close();
+    process.exit(1);
+  }
+  await sleep(2000); // 等前端 DOM 渲染完
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
 
