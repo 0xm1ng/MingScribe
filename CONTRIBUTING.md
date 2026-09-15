@@ -27,7 +27,7 @@ npm test          # 182 个用例，Node 内置 runner，零第三方依赖
 node tools/e2e_smoke.js
 ```
 
-## 三个容易踩的坑
+## 四个容易踩的坑
 
 ### 1. 新模块必须挂到 `window.MingScribe`
 
@@ -46,6 +46,14 @@ node tools/e2e_smoke.js
 `src/paginate.js` 是纯函数，同参数 + 同容器尺寸 ⇒ 同页边界。早期版本会「实测溢出再反推缩放重切」，导致前进 3 页再后退 3 页回不到原处。安全余量是常量 `ROWS_SAFETY = 0.9`，别改成自适应。
 
 另外**段落边距按「每段一次」计费**（`blockExtra`），不能摊进每行——摊进去会随段落数累积误差、整页溢出被裁。
+
+### 4. 测试不要写死时区
+
+`Exporter.formatDateTime` 按**本地时区**渲染（`getHours()` 那一族）。所以：
+
+- 期望值要用**本地时间**构造：`new Date(2026, 8, 14, 10, 10)` → `'2026-09-14 10:10'`，任何时区都成立。
+- 反过来，`Date.UTC(...)` 配一个写死的日期字符串**只在东八区成立**——本机跑是绿的，GitHub runner 是 UTC，必挂。2026-09-15 就是这么红了一整轮。
+- 本地自检：`TZ=UTC npm test`（或 `TZ=America/New_York`）。CI 里除了三个平台的 UTC，还专门多跑一个 `America/New_York` 的 job 守着这类问题。
 
 ## 加一种新格式该动哪里
 

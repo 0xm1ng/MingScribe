@@ -17,7 +17,9 @@ function makeBook() {
   return { title: 'Hello-CTF', text: 'x', totalChars: cursor, chapters };
 }
 
-const T = Date.UTC(2026, 8, 14, 2, 10); // 2026-09-14 10:10 UTC
+// 只当「某个固定时刻」用：formatDateTime 按**本地时区**渲染，
+// 所以任何断言都不能直接拿这个 UTC 毫秒数去比对写死的日期字符串。
+const T = Date.UTC(2026, 8, 14, 2, 10); // 2026-09-14 02:10 UTC
 
 test('formatDateTime 输出可读时间，非法输入回退到 0 时刻', () => {
   assert.equal(Exporter.formatDateTime(new Date(2026, 8, 14, 2, 10)), '2026-09-14 02:10');
@@ -114,10 +116,21 @@ test('批注里的换行被压平，避免破坏列表结构', () => {
 test('时间戳由调用方注入，输出可复现', () => {
   const book = makeBook();
   const args = [{ chapterIndex: 1, start: 0, end: 3, text: '原文', color: 'yellow' }];
+
+  // 同一个 now 导出两次，必须逐字节一致
   const a = Exporter.toMarkdown(book, args, { now: T, sourceName: 'b.txt' });
   const b = Exporter.toMarkdown(book, args, { now: T, sourceName: 'b.txt' });
-  assert.equal(a, b);
-  assert.ok(a.includes('- 导出时间：2026-09-14 10:10'));
+  assert.equal(a, b, '同一 now 两次导出应完全一致');
+
+  // 关键：formatDateTime 按本地时区渲染，期望值必须用**本地时间**构造。
+  // 之前这里写死 Date.UTC(...) 配 '10:10'，只在东八区成立，CI（UTC）必挂。
+  const localTenPastTen = new Date(2026, 8, 14, 10, 10).getTime();
+  const c = Exporter.toMarkdown(book, args, { now: localTenPastTen, sourceName: 'b.txt' });
+  assert.ok(c.includes('- 导出时间：2026-09-14 10:10'), '导出时间应按本地时区渲染注入的 now');
+
+  // now 改变 → 正文必须随之改变，证明用的是注入值而不是内部 Date.now()
+  const d = Exporter.toMarkdown(book, args, { now: localTenPastTen + 60 * 1000, sourceName: 'b.txt' });
+  assert.notEqual(c, d, 'now 变化后导出结果应随之变化');
 });
 
 test('章节标题缺失时用序号兜底', () => {

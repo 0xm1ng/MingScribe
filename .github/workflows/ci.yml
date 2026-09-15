@@ -8,13 +8,20 @@ on:
 
 jobs:
   test:
-    name: test (node${{ matrix.node }} / ${{ matrix.os }})
+    name: test (node${{ matrix.node }} / ${{ matrix.os }} / tz=${{ matrix.tz }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node: [22]
+        tz: [UTC]
+        include:
+          # 额外跑一个非 UTC 时区。formatDateTime 按本地时区渲染，
+          # 只跑 UTC 会把「写死东八区期望值」这类断言藏起来（2026-09-15 漏过一次）。
+          - os: ubuntu-latest
+            node: 22
+            tz: America/New_York
 
     steps:
       - uses: actions/checkout@v4
@@ -27,24 +34,26 @@ jobs:
 
       - name: Show runtime
         shell: bash
+        env:
+          TZ: ${{ matrix.tz }}
         run: |
           node --version
-          node -p "process.platform + ' ' + process.arch"
+          node -p "process.platform + ' ' + process.arch + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone"
 
       # 也刻意**不经 npm**：npm script 在三个平台上交给不同 shell，对 glob 的展开行为不一致；
       # 直接传 glob 字面量则统一由 Node 自己展开（Node 21+ 支持）。
       - name: Run tests
         shell: bash
+        env:
+          TZ: ${{ matrix.tz }}
         run: |
           set +e
           node --test "tests/*.test.js" > test.log 2>&1
           code=$?
           cat test.log
           if [ "$code" -ne 0 ]; then
-            # 把关键行经 annotation 通道抛出，便于在无仓库权限时也能定位失败原因
-            echo "::error::test step exited $code on $(node --version) / ${{ matrix.os }}"
-            grep -a -n -E "Error|error|Cannot|cannot|not found|ENOENT|SyntaxError|TypeError|ReferenceError|fail|# tests" test.log \
-              | head -8 \
-              | while IFS= read -r line; do echo "::error::$line"; done
+            # 把第一条失败用例连同断言信息经 annotation 抛出，便于在没有仓库权限时定位
+            msg=$(awk '/^not ok/ {p=1} p {printf "%s%%0A", $0; if (++n >= 10) exit}' test.log)
+            echo "::error::exited $code · $(node --version) · ${{ matrix.os }} · TZ=${{ matrix.tz }}%0A$msg"
           fi
           exit $code
