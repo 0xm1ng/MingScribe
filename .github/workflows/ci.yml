@@ -23,7 +23,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
+      - name: Show runtime
+        run: node --version
+
       # 网页版是零第三方依赖的：测试用的是 Node 内置 test runner，
       # 所以这里刻意不跑 npm install —— CI 全程无网络依赖、无 lockfile 风险。
+      # 也刻意**不经 npm**：直接调 node。npm script 在三个平台上交给不同 shell，
+      # 对 glob 的展开行为不一致；直接传 glob 字面量则统一由 Node 自己展开（Node 21+ 支持）。
       - name: Run tests
-        run: npm test
+        run: node --test "tests/*.test.js"
