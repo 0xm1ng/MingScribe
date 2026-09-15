@@ -1,6 +1,6 @@
 {
   "name": "mingscribe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "MingScribe — 纯前端、零依赖的电子书阅读器（TXT / EPUB），可选 Tauri 桌面壳经 Calibre 扩展 MOBI / AZW3 / DOCX 等格式",
   "scripts": {

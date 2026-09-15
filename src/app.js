@@ -27,7 +27,7 @@
    * 当前版本号。**必须与 package.json / src-tauri/tauri.conf.json 三处一致**——
    * tests/updater.test.js 里有一条测试专门守这件事，改了不同步会直接测试失败。
    */
-  var APP_VERSION = '0.1.0';
+  var APP_VERSION = '0.1.1';
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
