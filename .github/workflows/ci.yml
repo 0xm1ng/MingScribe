@@ -19,16 +19,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 网页版是零第三方依赖的：测试只用 Node 内置 test runner，
+      # 所以这里刻意不跑 npm install —— CI 全程无网络依赖、无 lockfile 风险。
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
 
       - name: Show runtime
-        run: node --version
+        shell: bash
+        run: |
+          node --version
+          node -p "process.platform + ' ' + process.arch"
 
-      # 网页版是零第三方依赖的：测试用的是 Node 内置 test runner，
-      # 所以这里刻意不跑 npm install —— CI 全程无网络依赖、无 lockfile 风险。
-      # 也刻意**不经 npm**：直接调 node。npm script 在三个平台上交给不同 shell，
-      # 对 glob 的展开行为不一致；直接传 glob 字面量则统一由 Node 自己展开（Node 21+ 支持）。
+      # 也刻意**不经 npm**：npm script 在三个平台上交给不同 shell，对 glob 的展开行为不一致；
+      # 直接传 glob 字面量则统一由 Node 自己展开（Node 21+ 支持）。
       - name: Run tests
-        run: node --test "tests/*.test.js"
+        shell: bash
+        run: |
+          set +e
+          node --test "tests/*.test.js" > test.log 2>&1
+          code=$?
+          cat test.log
+          if [ "$code" -ne 0 ]; then
+            # 把关键行经 annotation 通道抛出，便于在无仓库权限时也能定位失败原因
+            echo "::error::test step exited $code on $(node --version) / ${{ matrix.os }}"
+            grep -a -n -E "Error|error|Cannot|cannot|not found|ENOENT|SyntaxError|TypeError|ReferenceError|fail|# tests" test.log \
+              | head -8 \
+              | while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit $code
