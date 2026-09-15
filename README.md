@@ -135,7 +135,7 @@ src/
   app.js            显示层：界面与交互
   style.css         样式
 tests/              Node 内置测试运行器，无第三方依赖
-tools/              ebook 素材构建脚本 + 浏览器端到端自检脚本 + 格式转换链路自检脚本
+tools/              ebook 素材构建 / 格式转换自检 / 端到端自检 / README 截图生成等辅助脚本
 src-tauri/          桌面版（Tauri + Rust）：convert_to_epub 命令调用 ebook-convert
 ```
 
@@ -227,6 +227,16 @@ node tools/convert_check.js --input /path/to/book.mobi
 ```
 
 它会确认：转换产物能被现有 EPUB 解析层读出章节（`chapters.length > 0`），从而证明桌面版「选非原生格式 → 自动转 EPUB → 进入阅读器」的链路是通的。脚本里实现的 `run` 执行器，就是 `src/convert.js`「可注入后端」接口的**真实版参考实现**。
+
+### README 截图生成
+
+上面「界面」一节的图由 `tools/make_screenshots.js` 生成：同样用本机 Edge 打开本地页面，走完整的选文件、翻章、切滚动 / 分页 / 双页、划线批注、全文搜索流程，逐张输出到 `docs/screenshots/`。改完界面想刷新截图时跑它即可（同样不进入 `npm test`）：
+
+```
+node tools/make_screenshots.js
+```
+
+脚本注释里记了几个坑，改之前值得看一眼：导入完成的 toast 会盖住正文要等它消失；宽屏切分页会自动开双页对开，要单页图得显式切回；分页模式只渲染当前页的段落，划线相关截图必须放在滚动模式下做。
 
 最近一次实测结果（2026-09-14，Edge 无头模式，1280×900）。同一台机器上数值会随系统负载浮动，下表取实测区间：
 
