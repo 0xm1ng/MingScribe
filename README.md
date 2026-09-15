@@ -68,8 +68,8 @@ npm test
 
 | 文件 | 体积 | 说明 |
 |---|---|---|
-| `MingScribe_0.1.0_x64-setup.exe` | 1.83 MB | 常规安装程序，推荐 |
-| `MingScribe_0.1.0_x64_en-US.msi` | 2.75 MB | 适合企业批量部署 |
+| `MingScribe_0.1.1_x64-setup.exe` | 1.83 MB | 常规安装程序，推荐 |
+| `MingScribe_0.1.1_x64_en-US.msi` | 2.75 MB | 适合企业批量部署 |
 
 > 安装包**未做代码签名**，首次运行时 Windows SmartScreen 会提示「已保护你的电脑」——点「更多信息」→「仍要运行」即可。
 
@@ -369,12 +369,13 @@ npm run tauri:build
 
 | 产物 | 体积 | 说明 |
 |---|---|---|
-| `MingScribe_0.1.0_x64-setup.exe`（nsis） | 1.83 MB | 常规安装程序，推荐 |
-| `MingScribe_0.1.0_x64_en-US.msi`（msi） | 2.75 MB | 适合企业批量部署 |
+| `MingScribe_0.1.1_x64-setup.exe`（nsis） | 1.83 MB | 常规安装程序，推荐 |
+| `MingScribe_0.1.1_x64_en-US.msi`（msi） | 2.75 MB | 适合企业批量部署 |
 
 体积这么小是因为**不打包 WebView2 运行时**——Windows 10/11 已内置 Edge WebView2，
-安装程序只带应用本体与前端资源（前端被压缩后嵌进二进制）。首次构建需要完整编译 Rust 依赖
-（实测 86 分钟），之后是增量（约 6 分钟）。
+安装程序只带应用本体与前端资源（前端被压缩后嵌进二进制，所以在 exe 里直接搜前端字符串是搜不到的）。
+构建耗时：首次需完整编译 Rust 依赖（实测 86 分钟）；之后只改前端约 6 分钟；
+若连带改了 `Cargo.toml`（比如升版本号）约 9 分钟。
 
 ### 支持格式表
 
