@@ -301,6 +301,19 @@ body {
 
 .reader-content:focus { outline: none; }
 
+/*
+ * 滚动模式的版心宽度也跟随「页宽」档位，与分页模式保持一致。
+ *
+ * 不设的话宽屏下正文会铺满整个窗口：1440px 宽配 19px 字号，一行能排七十多个汉字，
+ * 读起来很累；而且顶部「宽− / 宽+」在滚动模式下完全没有反应——它只改 --page-width，
+ * 而 --page-width 原本只被分页的 .page-frame 用到，滚动模式里根本没有 .page-frame。
+ * 用左右 padding 撑出版心，不动 DOM 结构，因此不影响分页切页算法读到的盒模型。
+ */
+body[data-mode="scroll"] .reader-content {
+  padding-left: max(24px, calc((100% - var(--page-width)) / 2));
+  padding-right: max(24px, calc((100% - var(--page-width)) / 2));
+}
+
 /* ---------- 分页阅读模式 ---------- */
 
 /*
