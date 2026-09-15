@@ -214,6 +214,19 @@ node tools/e2e_smoke.js
 
 它**不进入 `npm test`**：依赖本机 Edge 与外部电子书素材，不适合作为交付门禁。产物 `tools/_e2e_report.txt` 与截图已被 `.gitignore` 忽略。
 
+### 更新检查自检
+
+「检查更新」这件事，单元测试只能证明 `Updater` 的纯逻辑对，证明不了按钮绑上了、脚本加载了、真实网络通了、提示条会弹。所以另有两个脚本做真实验收（同样不进入 `npm test`）：
+
+```bash
+node tools/check_update_e2e.js     # 本地 http + 真实 Edge：真实网络分支 + 拦成 v9.9.9 的「有新版本」分支
+node tools/check_desktop_update.js # 拉起打包好的 exe，用 CDP 连进去点按钮（真机验收）
+```
+
+`check_update_e2e.js` 会起一个本地 http 服务再打开页面——**不能**用 `file://`：Chrome 在 file 源下会直接禁掉 `fetch`，那样测出来的是「假失败」。它还顺带验证「忽略此版本」在刷新后依然生效。
+
+`check_desktop_update.js` 存在的理由：桌面版的页面源是 `http://tauri.localhost`，跟网页版的 `http://127.0.0.1` 不同，跨域与 `window.open` 的行为都不一样，网页版过了不代表桌面版能过。它靠给 WebView2 传 `--remote-debugging-port` 把打包产物拉起来再 CDP 连进去，同时验证 `open_url` 的安全护栏（非 http/https 必须被拒）。
+
 ### 格式转换链路自检（需桌面版 Calibre）
 
 多格式转换依赖 Calibre 的 `ebook-convert`，浏览器 / CI 环境通常没有。本仓库附带 `tools/convert_check.js`，在**已安装 Calibre 且 `ebook-convert` 在 PATH** 的机器上验证「源格式 → ebook-convert → EPUB → `Epub.parseEpub` 能解析」整条链路；没有 Calibre 时自动跳过（退出码 0，不污染交付门禁）。
