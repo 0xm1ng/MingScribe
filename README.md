@@ -1,9 +1,10 @@
 # MingScribe
 
 [![CI](https://github.com/0xm1ng/MingScribe/actions/workflows/ci.yml/badge.svg)](https://github.com/0xm1ng/MingScribe/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/0xm1ng/MingScribe?label=release)](https://github.com/0xm1ng/MingScribe/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)](#运行测试)
-[![Zero runtime deps](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#依赖原则)
+[![Zero runtime deps](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#许可)
 
 一个**纯前端、零依赖**的电子书阅读器，外加一个可选的**桌面壳**。
 
@@ -29,7 +30,16 @@ npm test
 
 ### 桌面版（多格式）
 
-需要 Rust 与 Calibre，详见下方「桌面版与多格式支持」一节。
+不想自己编译 Rust？直接到 [Releases](https://github.com/0xm1ng/MingScribe/releases/latest) 下载 Windows x64 安装包：
+
+| 文件 | 体积 | 说明 |
+|---|---|---|
+| `MingScribe_0.1.0_x64-setup.exe` | 1.83 MB | 常规安装程序，推荐 |
+| `MingScribe_0.1.0_x64_en-US.msi` | 2.75 MB | 适合企业批量部署 |
+
+> 安装包**未做代码签名**，首次运行时 Windows SmartScreen 会提示「已保护你的电脑」——点「更多信息」→「仍要运行」即可。
+
+要自己编译，则需要 Rust 与 Calibre，详见下方「桌面版与多格式支持」一节：
 
 ```bash
 npm install
