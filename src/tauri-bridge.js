@@ -20,8 +20,12 @@
     return !!(root.__TAURI__ || root.__TAURI_INTERNALS__);
   }
 
-  // 任何环境都暴露这个桩，满足模块挂载守卫
-  MingScribe.TauriBridge = { isTauri: isTauri };
+  // 任何环境都暴露这个桩，满足模块挂载守卫。
+  // 网页版的 openExternal 统一返回 false，由调用方（app.js）降级到 window.open。
+  MingScribe.TauriBridge = {
+    isTauri: isTauri,
+    openExternal: function () { return Promise.resolve(false); }
+  };
 
   if (!isTauri()) return; // 纯网页版到此为止
 
@@ -58,6 +62,16 @@
     console.warn('[MingScribe] 检测到 Tauri 全局对象，但未找到 invoke 方法');
     return;
   }
+
+  // 用系统默认浏览器打开外部链接（Tauri 里 window.open 打不开系统浏览器）
+  MingScribe.TauriBridge.openExternal = function (url) {
+    return invoke('open_url', { url: url })
+      .then(function () { return true; })
+      .catch(function (err) {
+        console.warn('[MingScribe] 打开外部链接失败', err);
+        return false;
+      });
+  };
 
   // app.js 的 getConvertBackend 读取 window.MingScribeConvert；同时保留旧位置兼容
   root.MingScribeConvert = MingScribe.MingScribeConvert = {

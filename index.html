@@ -29,6 +29,18 @@
   </div>
   <ul id="shelf-list" class="shelf-list"></ul>
   <p id="shelf-empty" class="empty">书架还是空的。选一个 TXT 或 EPUB 文件开始吧。</p>
+
+  <div id="update-bar" class="update-bar" hidden>
+    <span id="update-text"></span>
+    <a id="btn-update-go" class="link-btn" href="https://github.com/0xm1ng/MingScribe/releases" target="_blank" rel="noopener">去下载</a>
+    <button id="btn-update-skip" class="link-btn" type="button">忽略此版本</button>
+    <button id="btn-update-close" class="link-btn" type="button">关闭</button>
+  </div>
+
+  <p class="shelf-foot">
+    <button id="btn-check-update" class="link-btn" type="button">检查更新</button>
+    <span id="shelf-version" class="muted"></span>
+  </p>
 </section>
 
 <section id="reader-screen" class="screen reader" hidden>
@@ -141,6 +153,7 @@
 <script src="src/annotations.js"></script>
 <script src="src/exporter.js"></script>
 <script src="src/bookstore.js"></script>
+<script src="src/updater.js"></script>
 <script src="src/app.js"></script>
 </body>
 </html>

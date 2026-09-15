@@ -20,6 +20,14 @@
   var Exporter = window.MingScribe.Exporter;
   var BookStore = window.MingScribe.BookStore;
   var Convert = window.MingScribe.Convert;
+  var Updater = window.MingScribe.Updater;
+  var TauriBridge = window.MingScribe.TauriBridge;
+
+  /**
+   * 当前版本号。**必须与 package.json / src-tauri/tauri.conf.json 三处一致**——
+   * tests/updater.test.js 里有一条测试专门守这件事，改了不同步会直接测试失败。
+   */
+  var APP_VERSION = '0.1.0';
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
@@ -78,7 +86,9 @@
     pageIndex: 0,
     /** 对开（双页）偏好：null = 跟随屏幕宽度自动，true/false = 用户手动锁定。 */
     spreadUserPref: null,
-    resizeTimer: null
+    resizeTimer: null,
+    /** 查到的新版本号（用于「忽略此版本」）；没有新版本时为 null。 */
+    updateVersion: null
   };
 
   var el = {};
@@ -2007,6 +2017,22 @@
       toast('已清空全部书籍、阅读记录与划线');
     });
 
+    el.checkUpdateBtn.addEventListener('click', function () { checkForUpdate(true); });
+    el.updateClose.addEventListener('click', hideUpdateBar);
+    el.updateSkip.addEventListener('click', function () {
+      if (state.updateVersion) savePrefs({ skipUpdateVersion: state.updateVersion });
+      hideUpdateBar();
+      toast('已忽略 ' + state.updateVersion + '，以后不再提示');
+    });
+    el.updateGo.addEventListener('click', function (event) {
+      // 桌面壳里 window.open 打不开系统浏览器，交给 Tauri 命令；网页版走正常的 <a> 跳转
+      if (!(TauriBridge.isTauri && TauriBridge.isTauri())) return;
+      event.preventDefault();
+      TauriBridge.openExternal(el.updateGo.href).then(function (ok) {
+        if (!ok) toast('打不开浏览器，请手动访问：' + el.updateGo.href);
+      });
+    });
+
     el.backBtn.addEventListener('click', backToShelf);
     el.prevBtn.addEventListener('click', function () { goChapter(-1); });
     el.nextBtn.addEventListener('click', function () { goChapter(1); });
@@ -2236,6 +2262,13 @@
     el.shelfList = $('shelf-list');
     el.shelfEmpty = $('shelf-empty');
     el.clearAll = $('clear-all');
+    el.updateBar = $('update-bar');
+    el.updateText = $('update-text');
+    el.updateGo = $('btn-update-go');
+    el.updateSkip = $('btn-update-skip');
+    el.updateClose = $('btn-update-close');
+    el.checkUpdateBtn = $('btn-check-update');
+    el.shelfVersion = $('shelf-version');
 
     el.readerBookName = $('reader-book-name');
     el.readerChapterName = $('reader-chapter-name');
@@ -2298,6 +2331,55 @@
     el.toast = $('toast');
   }
 
+  /* ---------------- 版本更新 ---------------- */
+
+  function hideUpdateBar() { el.updateBar.hidden = true; }
+
+  /**
+   * 检查新版本。
+   *
+   * 刻意**不做**静默下载安装：那需要代码签名证书（每年几百到几千元），
+   * 而且未签名的自动更新会被 SmartScreen 和杀软直接拦下，体验反而更差。
+   * 这里只做「查到 → 提示 → 用户自己点链接下载」——开源个人项目的通行做法。
+   *
+   * @param {boolean} manual 手动点击时为 true：此时无论结果如何都要给用户反馈。
+   */
+  function checkForUpdate(manual) {
+    var prefs = loadPrefs();
+
+    if (!Updater.shouldCheck({ lastCheckAt: prefs.lastUpdateCheckAt, now: Date.now(), force: manual })) {
+      if (manual) toast('刚刚查过了，稍后再试');
+      return;
+    }
+    savePrefs({ lastUpdateCheckAt: Date.now() });
+
+    Updater.checkUpdate({
+      currentVersion: APP_VERSION,
+      // GitHub Releases API 匿名可读，不需要 token
+      fetchJson: function (url) {
+        return fetch(url, { headers: { Accept: 'application/vnd.github+json' } }).then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        });
+      }
+    }).then(function (result) {
+      if (!result.hasUpdate) {
+        if (manual) {
+          toast(result.reason === 'offline'
+            ? '检查更新失败：连不上 GitHub，稍后再试'
+            : '已经是最新版本（v' + APP_VERSION + '）');
+        }
+        return;
+      }
+      if (prefs.skipUpdateVersion === result.latest.version) return; // 用户之前忽略过这一版
+
+      state.updateVersion = result.latest.version;
+      el.updateText.textContent = '有新版本 v' + result.latest.version + '（当前 v' + APP_VERSION + '）';
+      if (result.latest.url) el.updateGo.href = result.latest.url;
+      el.updateBar.hidden = false;
+    });
+  }
+
   function init() {
     cacheElements();
     bindEvents();
@@ -2315,6 +2397,9 @@
     applySpreadChrome();
 
     renderShelf();
+    el.shelfVersion.textContent = 'v' + APP_VERSION;
+    // 静默检查：一天最多一次，失败也不打扰
+    checkForUpdate(false);
     initCache(function () {
       renderShelf();
       if (cacheBackend === 'memory') {

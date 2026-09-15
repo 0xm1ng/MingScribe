@@ -55,10 +55,51 @@ fn convert_to_epub(input_b64: String, input_ext: String) -> Result<String, Strin
     Ok(STANDARD.encode(epub))
 }
 
+/// 用系统默认浏览器打开一个外部链接。
+///
+/// 为什么需要：Tauri 的 webview 里 `window.open('https://…')` 默认打不开系统浏览器，
+/// 而「发现新版本 → 去下载」必须能跳出去。这里刻意**不引入 opener 插件**——
+/// 直接用系统自带的打开命令就行，少一个依赖、少一份后续升级负担。
+///
+/// 安全约束：只放行 http / https，避免被利用去启动本地程序或访问 file://。
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("只允许打开 http/https 链接".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // "start" 是 cmd 的内置命令；中间那个空字符串是 start 的窗口标题参数，不能省
+        Command::new("cmd")
+            .args(["/c", "start", "", &url])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![convert_to_epub])
+        .invoke_handler(tauri::generate_handler![convert_to_epub, open_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -114,6 +114,33 @@ body {
   line-height: 1.7;
 }
 
+/* 新版本提示条：放在书架底部，不打断「选书 → 读书」的主流程 */
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 20px 0 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+}
+
+.update-bar[hidden] { display: none; }
+
+.shelf-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 40px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .list-head {
   display: flex;
   align-items: baseline;
