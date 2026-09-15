@@ -1,6 +1,6 @@
 # MingScribe
 
-[![CI](https://github.com/Ethan-bot-coder/MingScribe/actions/workflows/ci.yml/badge.svg)](https://github.com/Ethan-bot-coder/MingScribe/actions/workflows/ci.yml)
+[![CI](https://github.com/0xm1ng/MingScribe/actions/workflows/ci.yml/badge.svg)](https://github.com/0xm1ng/MingScribe/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)](#运行测试)
 [![Zero runtime deps](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#依赖原则)

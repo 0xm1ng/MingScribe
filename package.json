@@ -19,13 +19,13 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
   },
-  "homepage": "https://github.com/Ethan-bot-coder/MingScribe#readme",
+  "homepage": "https://github.com/0xm1ng/MingScribe#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ethan-bot-coder/MingScribe.git"
+    "url": "git+https://github.com/0xm1ng/MingScribe.git"
   },
   "bugs": {
-    "url": "https://github.com/Ethan-bot-coder/MingScribe/issues"
+    "url": "https://github.com/0xm1ng/MingScribe/issues"
   },
   "keywords": [
     "ebook",
