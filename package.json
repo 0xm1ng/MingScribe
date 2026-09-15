@@ -28,11 +28,20 @@
     "url": "https://github.com/0xm1ng/MingScribe/issues"
   },
   "keywords": [
-    "ebook",
-    "reader",
-    "txt",
+    "calibre",
+    "desktop-app",
+    "e-book",
+    "ebook-reader",
     "epub",
-    "tauri"
+    "javascript",
+    "markdown",
+    "offline",
+    "reader",
+    "rust",
+    "tauri",
+    "txt",
+    "vanilla-js",
+    "zero-dependency"
   ],
   "license": "MIT"
 }
