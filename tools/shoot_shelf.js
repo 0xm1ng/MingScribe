@@ -93,6 +93,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(400);
   await page.screenshot({ path: path.join(dir, '6-dark.png') });
 
+  // 切回日间，进阅读器拍顶栏 + 「Aa」排版面板
+  await page.click('#btn-theme-2');
+  await sleep(300);
+  await page.evaluate(() => {
+    var btn = document.querySelector('#shelf-grid .book-card button[data-action="open"]');
+    if (btn) btn.click();
+  });
+  await page.waitForSelector('#reader-screen:not([hidden])');
+  await sleep(700);
+  await page.click('#btn-typo');
+  await sleep(350);
+  await page.screenshot({ path: path.join(dir, '7-typo.png') });
+
   console.log('页面报错:', errs.length ? errs : '无');
   console.log('截图已存:', dir);
   await browser.close();

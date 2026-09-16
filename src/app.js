@@ -23,6 +23,7 @@
   var Updater = window.MingScribe.Updater;
   var ReadingPrefs = window.MingScribe.ReadingPrefs;
   var TauriBridge = window.MingScribe.TauriBridge;
+  var Cover = window.MingScribe.Cover;
 
   /**
    * 当前版本号。**必须与 package.json / src-tauri/tauri.conf.json 三处一致**——
@@ -157,7 +158,23 @@
     paintFontSize(resolved.fontSize);
     paintLineHeight(resolved.lineHeight);
     paintPageWidth(resolved.pageWidth);
+    syncTypoTips();
     return resolved;
+  }
+
+  /**
+   * 把当前生效的字号 / 行距 / 页宽写进「Aa」面板的数值位。
+   * 纯展示，不写存储 —— 所以打开书用它来回显本书排版是安全的。
+   */
+  function syncTypoTips() {
+    if (!el.typoPanel) return;
+    var t = currentTypo();
+    var fs = Math.round(Number(t.fontSize) || DEFAULT_FONT_SIZE);
+    var lh = Number(t.lineHeight) || DEFAULT_LINE_HEIGHT;
+    var pw = Number(t.pageWidth) || DEFAULT_PAGE_WIDTH;
+    if (el.typoFontVal) el.typoFontVal.textContent = String(fs);
+    if (el.typoLineVal) el.typoLineVal.textContent = String(lh);
+    if (el.typoWidthVal) el.typoWidthVal.textContent = String(pw);
   }
 
   function paintFontSize(size) {
@@ -169,6 +186,7 @@
   function applyFontSize(size) {
     var clamped = paintFontSize(size);
     persistTypo({ fontSize: clamped });
+    syncTypoTips();
     return clamped;
   }
 
@@ -194,6 +212,7 @@
   function applyLineHeight(value) {
     var clamped = paintLineHeight(value);
     persistTypo({ lineHeight: clamped });
+    syncTypoTips();
     return clamped;
   }
 
@@ -206,6 +225,7 @@
   function applyPageWidth(value) {
     var clamped = paintPageWidth(value);
     persistTypo({ pageWidth: clamped });
+    syncTypoTips();
     return clamped;
   }
 
@@ -294,6 +314,10 @@
     var value = theme === 'dark' ? 'dark' : 'light';
     document.body.setAttribute('data-theme', value);
     savePrefs({ theme: value });
+    // 夜间时给两个主题按钮加激活态，明确「现在正处在哪个主题」
+    var on = value === 'dark';
+    if (el.themeBtn) el.themeBtn.classList.toggle('active', on);
+    if (el.themeBtn2) el.themeBtn2.classList.toggle('active', on);
     return value;
   }
 
@@ -413,13 +437,6 @@
       if (r && r.key) byKey[r.key] = r;
     });
 
-    function coverColors(title) {
-      var h = 0;
-      title = title || '?';
-      for (var i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) % 360;
-      return { c1: 'hsl(' + h + ', 52%, 46%)', c2: 'hsl(' + ((h + 28) % 360) + ', 58%, 30%)' };
-    }
-
     function paint(books) {
       var seen = {};
       var items = [];
@@ -439,6 +456,8 @@
 
       el.shelfGrid.innerHTML = '';
       el.shelfEmpty.hidden = items.length > 0;
+      // 空书架时让网格里的「＋添加图书」虚卡退场，避免与空态里的按钮重复
+      el.shelfGrid.classList.toggle('is-empty', items.length === 0);
       el.shelfCount.textContent = items.length ? '共 ' + items.length + ' 本' : '';
 
       var frag = document.createDocumentFragment();
@@ -460,7 +479,7 @@
         bits.push(item.cached ? '已缓存' : '需重新选择文件');
         var meta = bits.join(' · ');
         var pct = Number(rec && rec.percent) || 0;
-        var colors = coverColors(item.title);
+        var colors = Cover.colorFor(item.title);
         var first = (item.title || '?').trim().charAt(0) || '?';
         if (/[a-z]/i.test(first)) first = first.toUpperCase();
 
@@ -2120,6 +2139,9 @@
     if (el.openFileBtn) {
       el.openFileBtn.addEventListener('click', pickFile);
     }
+    if (el.emptyAddBtn) {
+      el.emptyAddBtn.addEventListener('click', pickFile);
+    }
 
     el.fileInput.addEventListener('change', function () {
       var file = el.fileInput.files && el.fileInput.files[0];
@@ -2175,6 +2197,25 @@
       if (!el.appMenu.hidden && !event.target.closest('.menu-wrap')) closeMenu();
     });
 
+    // 阅读器「Aa」排版面板：与书架菜单同款交互（点击切换、点外面关、Esc 关）
+    function closeTypoPanel() {
+      if (!el.typoPanel) return;
+      el.typoPanel.hidden = true;
+      if (el.typoBtn) el.typoBtn.setAttribute('aria-expanded', 'false');
+    }
+    if (el.typoBtn && el.typoPanel) {
+      el.typoBtn.addEventListener('click', function (event) {
+        event.stopPropagation();
+        var open = el.typoPanel.hidden;
+        el.typoPanel.hidden = !open;
+        el.typoBtn.setAttribute('aria-expanded', String(open));
+        if (open) syncTypoTips(); // 打开时才回显当前值
+      });
+    }
+    document.addEventListener('click', function (event) {
+      if (el.typoPanel && !el.typoPanel.hidden && !event.target.closest('#typo-wrap')) closeTypoPanel();
+    });
+
     // 关于 / 帮助 弹窗
     function openModal(modal) { modal.hidden = false; }
     function closeModal(modal) { modal.hidden = true; }
@@ -2190,6 +2231,7 @@
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') {
         if (!el.appMenu.hidden) closeMenu();
+        else if (el.typoPanel && !el.typoPanel.hidden) closeTypoPanel();
         else if (!el.aboutModal.hidden) closeModal(el.aboutModal);
         else if (!el.helpModal.hidden) closeModal(el.helpModal);
       }
@@ -2433,6 +2475,7 @@
     el.shelfGrid = $('shelf-grid');
     el.shelfCount = $('shelf-count');
     el.shelfEmpty = $('shelf-empty');
+    el.emptyAddBtn = $('btn-empty-add');
     el.clearAll = $('clear-all');
 
     el.appMenu = $('app-menu');
@@ -2473,6 +2516,12 @@
     el.spreadBtn = $('btn-spread');
     el.themeBtn = $('btn-theme');
     el.typoResetBtn = $('btn-typo-reset');
+    el.typoBtn = $('btn-typo');
+    el.typoPanel = $('typo-panel');
+    el.typoWrap = $('typo-wrap');
+    el.typoFontVal = $('typo-font-val');
+    el.typoLineVal = $('typo-line-val');
+    el.typoWidthVal = $('typo-width-val');
     el.progressBar = $('progress-bar');
     el.progressFill = $('progress-fill');
     el.progressKnob = $('progress-knob');

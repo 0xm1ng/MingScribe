@@ -61,7 +61,10 @@ async function newPage(browser, log) {
   await p1.waitForTimeout(1500);
   console.log('Updater 模块已挂载 :', await p1.evaluate(() => !!(window.MingScribe && window.MingScribe.Updater)));
   console.log('请求地址          :', await p1.evaluate(() => window.MingScribe.Updater.DEFAULT_API));
-  await p1.click('#btn-check-update');
+  // 「检查更新」已按主流惯例收进左上/右上菜单，不再放书架页脚
+  await p1.click('#btn-menu');
+  await p1.waitForTimeout(150);
+  await p1.click('#app-menu [data-action="check"]');
   await p1.waitForSelector('#toast:not([hidden])', { timeout: 15000 });
   console.log('A) 真实网络提示    :', (await p1.textContent('#toast')).trim());
   console.log('A) 更新条保持隐藏  :', await p1.$eval('#update-bar', (el) => el.hidden));
@@ -82,7 +85,7 @@ async function newPage(browser, log) {
   await p2.waitForSelector('#update-bar:not([hidden])', { timeout: 15000 });
   console.log('\nB) 更新条文案      :', (await p2.textContent('#update-text')).trim());
   console.log('B) 去下载链接      :', await p2.$eval('#btn-update-go', (el) => el.getAttribute('href')));
-  console.log('B) 书架版本号      :', (await p2.textContent('#shelf-version')).trim());
+  console.log('B) 书架版本号      :', (await p2.textContent('#about-version')).trim());
   await p2.click('#btn-update-skip');
   await p2.waitForTimeout(300);
   console.log('B) 点忽略后隐藏    :', await p2.$eval('#update-bar', (el) => el.hidden));

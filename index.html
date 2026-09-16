@@ -53,7 +53,12 @@
   </div>
 
   <div id="shelf-grid" class="shelf-grid"></div>
-  <p id="shelf-empty" class="empty">书架还是空的。点「＋ 添加图书」选一个 TXT 或 EPUB 文件开始吧。</p>
+  <div id="shelf-empty" class="empty">
+    <span class="empty-icon" aria-hidden="true">📖</span>
+    <h3 class="empty-title">书架还是空的</h3>
+    <p class="empty-desc">添加一本 TXT 或 EPUB 就能开始阅读。文件只在本机读取，不会上传到任何服务器。</p>
+    <button id="btn-empty-add" class="btn btn-primary btn-lg" type="button">＋ 添加图书</button>
+  </div>
 
   <div class="feature-strip">
     <div class="feature">
@@ -132,19 +137,47 @@
       <span id="reader-book-name">未命名</span>
       <span id="reader-chapter-name" class="muted"></span>
     </div>
-    <button id="btn-toc" class="icon-btn" type="button" title="目录">目录</button>
-    <button id="btn-search" class="icon-btn" type="button" title="搜索正文（Ctrl+F）">搜索</button>
-    <button id="btn-notes" class="icon-btn" type="button" title="我的划线（Ctrl+M）">笔记</button>
-    <button id="btn-mode" class="icon-btn" type="button" title="在滚动 / 分页之间切换">滚动</button>
-    <button id="btn-spread" class="icon-btn" type="button" title="在单页 / 双页对开之间切换">单页</button>
+
+    <div class="bar-group">
+      <button id="btn-toc" class="icon-btn" type="button" title="目录">目录</button>
+      <button id="btn-search" class="icon-btn" type="button" title="搜索正文（Ctrl+F）">搜索</button>
+      <button id="btn-notes" class="icon-btn" type="button" title="我的划线（Ctrl+M）">笔记</button>
+    </div>
+
     <span class="bar-divider"></span>
-    <button id="btn-font-down" class="icon-btn" type="button" title="缩小字号">A−</button>
-    <button id="btn-font-up" class="icon-btn" type="button" title="放大字号">A+</button>
-    <button id="btn-line-down" class="icon-btn" type="button" title="收紧行距">行−</button>
-    <button id="btn-line-up" class="icon-btn" type="button" title="放宽行距">行+</button>
-    <button id="btn-width-down" class="icon-btn" type="button" title="收窄页宽">宽−</button>
-    <button id="btn-width-up" class="icon-btn" type="button" title="放宽页宽">宽+</button>
-    <button id="btn-typo-reset" class="icon-btn" type="button" title="本书排版恢复为默认（跟随全局设置）">复位</button>
+
+    <div class="bar-group">
+      <button id="btn-mode" class="icon-btn" type="button" title="在滚动 / 分页之间切换">滚动</button>
+      <button id="btn-spread" class="icon-btn" type="button" title="在单页 / 双页对开之间切换">单页</button>
+    </div>
+
+    <span class="bar-divider"></span>
+
+    <div id="typo-wrap" class="menu-wrap">
+      <button id="btn-typo" class="icon-btn" type="button" aria-haspopup="true" aria-expanded="false" title="排版：字号 / 行距 / 页宽">Aa</button>
+      <div id="typo-panel" class="menu typo-panel" role="menu" hidden>
+        <div class="typo-row" role="group" aria-label="字号">
+          <span class="typo-label">字号</span>
+          <button id="btn-font-down" class="step-btn" type="button" title="缩小字号">A−</button>
+          <span id="typo-font-val" class="typo-val">19</span>
+          <button id="btn-font-up" class="step-btn" type="button" title="放大字号">A+</button>
+        </div>
+        <div class="typo-row" role="group" aria-label="行距">
+          <span class="typo-label">行距</span>
+          <button id="btn-line-down" class="step-btn" type="button" title="收紧行距">−</button>
+          <span id="typo-line-val" class="typo-val">1.85</span>
+          <button id="btn-line-up" class="step-btn" type="button" title="放宽行距">＋</button>
+        </div>
+        <div class="typo-row" role="group" aria-label="页宽">
+          <span class="typo-label">页宽</span>
+          <button id="btn-width-down" class="step-btn" type="button" title="收窄页宽">−</button>
+          <span id="typo-width-val" class="typo-val">36</span>
+          <button id="btn-width-up" class="step-btn" type="button" title="放宽页宽">＋</button>
+        </div>
+        <button id="btn-typo-reset" class="link-btn typo-reset" type="button" title="本书排版恢复为默认（跟随全局设置）">恢复默认</button>
+      </div>
+    </div>
+
     <button id="btn-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
   </header>
 
@@ -238,6 +271,7 @@
 <script src="src/bookstore.js"></script>
 <script src="src/updater.js"></script>
 <script src="src/readingprefs.js"></script>
+<script src="src/cover.js"></script>
 <script src="src/app.js"></script>
 </body>
 </html>

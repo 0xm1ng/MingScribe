@@ -68,6 +68,21 @@ async function ensureSpread(page, want) {
   return (await txt(page, '#btn-spread')) === want;
 }
 
+// 字号 / 行距 / 页宽按钮收在「Aa」面板里，点之前先保证面板可见
+async function openTypoPanel(page) {
+  if (await page.$eval('#typo-panel', (el) => el.hidden)) {
+    await page.click('#btn-typo');
+    await page.waitForTimeout(200);
+  }
+}
+
+async function closeTypoPanel(page) {
+  if (!(await page.$eval('#typo-panel', (el) => el.hidden))) {
+    await page.click('#btn-typo');
+    await page.waitForTimeout(200);
+  }
+}
+
 /**
  * 划一条线。每次划线都会把段落拆出 <mark>，段落与文本节点都会变，
  * 所以每次都重新扫描「不含划线、且文本够长」的段落，不能用固定下标。
@@ -161,7 +176,9 @@ async function makeHighlight(page, opts) {
   step('3. 已跳到章节：' + (await txt(page, '#reader-chapter-name')));
 
   /* ---------- 页宽推到最大档，1440 宽下默认版心偏窄 ---------- */
+  await openTypoPanel(page);
   for (let i = 0; i < 5; i++) { await page.click('#btn-width-up'); await page.waitForTimeout(150); }
+  await closeTypoPanel(page);
   step('4. 页宽推到最大档');
 
   /* ---------- 02 滚动模式 ---------- */

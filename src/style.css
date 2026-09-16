@@ -285,14 +285,33 @@ body {
 .book-add-inner { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
 .book-add-inner .plus { font-size: 34px; line-height: 1; font-weight: 300; }
 
+/* 空书架：整块网格让位给下方更完整的空态卡片，免得两个「添加图书」打架 */
+.shelf-grid.is-empty { display: none; }
+
 .empty {
-  font-size: 14px;
-  color: var(--text-muted);
-  padding: 44px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 52px 24px 56px;
   text-align: center;
   border: 1px dashed var(--border);
-  border-radius: 14px;
-  margin-top: 18px;
+  border-radius: 16px;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+/* 上面把 display 改了，UA 的 [hidden]{display:none} 会被 .empty 压过去，必须显式补一条 */
+.empty[hidden] { display: none; }
+
+.empty-icon { font-size: 40px; line-height: 1; margin-bottom: 4px; }
+.empty-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
+.empty-desc {
+  margin: 0 0 14px;
+  max-width: 400px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
 }
 
 /* 书架底部特性横幅：填充版面，也把核心卖点常驻在眼前 */
@@ -362,6 +381,11 @@ body {
   padding: 15px 16px;
 }
 
+/* 按动反馈（动画设计准则：只动 transform，幅度 0.97） */
+.btn:active:not(:disabled) { transform: scale(0.97); }
+
+.btn-lg { padding: 12px 24px; font-size: 15px; }
+
 #file-input {
   position: absolute;
   width: 1px;
@@ -428,6 +452,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .book-card, .book-add, .menu, .modal-backdrop, .modal-card { animation: none; }
   .book-card:hover, .book-add:hover { transform: none; }
+  .btn:active:not(:disabled), .step-btn:active { transform: none; }
 }
 
 /* ---------- 阅读器 ---------- */
@@ -443,7 +468,9 @@ body {
 .reader-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  row-gap: 6px;
+  flex-wrap: wrap;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
@@ -486,11 +513,29 @@ body {
   height: 32px;
   padding: 0 8px;
   cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .icon-btn:hover {
   background: var(--accent-soft);
   border-color: var(--border);
+}
+
+/*
+ * 开关型按钮（滚动/分页、单页/双页）：JS 一直在切 .active，
+ * 但样式表里从来没有 .active 规则 —— 状态切换是「隐形」的。补上可见反馈。
+ */
+.icon-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  font-weight: 600;
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .toc {
@@ -719,6 +764,75 @@ body:not([data-mode="paged"]) .page-edge { display: none; }
   background: var(--border);
   flex: none;
   margin: 0 2px;
+}
+
+/*
+ * 顶栏按钮分组：把「浏览（目录/搜索/笔记）」「视图（滚动/分页）」抱成团，
+ * 免得一排同款文字按钮糊成一片、分不出哪几个是一类。
+ */
+.bar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+/* ---------- 「Aa」排版弹出面板 ---------- */
+
+.typo-panel {
+  min-width: 216px;
+  padding: 10px 10px 8px;
+}
+
+.typo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.typo-label {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.step-btn {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  width: 30px;
+  height: 28px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease);
+}
+
+.step-btn:hover { border-color: var(--accent); color: var(--accent); }
+.step-btn:active { transform: scale(0.94); }
+.step-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.typo-val {
+  min-width: 38px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.typo-reset {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--border);
+  text-align: left;
 }
 
 .reader-content h2 {
@@ -1205,10 +1319,17 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
 
 .toast[hidden] { display: none; }
 
+/* 窄窗口：分组背景退场、分隔线收起，把空间让给按钮（按钮本身换行，不隐藏功能） */
+@media (max-width: 900px) {
+  .bar-group { background: none; padding: 0; }
+}
+
 @media (max-width: 640px) {
+  .reader-bar { padding: 8px 10px; }
+  .bar-divider { display: none; }
   .reader-content { padding: 28px 18px 56px; }
   .page-frame { padding: 22px 16px 40px; }
   /* 窄屏下翻页热区太占地方，靠键盘/滑动即可 */
   .page-edge { display: none; }
-  .shelf { padding: 40px 18px 32px; }
+  .shelf { padding: 28px 18px 32px; }
 }

@@ -57,18 +57,42 @@ async function fontOf(page) {
 }
 
 async function openByTitle(page, title) {
-  const idx = await page.$$eval('#shelf-list .shelf-item', (els, t) =>
-    els.findIndex((e) => e.textContent.includes(t)), title);
-  if (idx < 0) throw new Error('书架上找不到《' + title + '》');
-  await page.click(`#shelf-list .shelf-item:nth-child(${idx + 1}) button[data-action="open"]`);
+  // 书架已改成卡片网格（#shelf-grid .book-card），且首张是「＋添加图书」虚卡，
+  // 用 nth-child 会错位；按卡片文字匹配更稳（与 e2e_smoke 同源做法）。
+  const ok = await page.evaluate((t) => {
+    const cards = Array.prototype.slice.call(document.querySelectorAll('#shelf-grid .book-card'));
+    const hit = cards.filter((c) => c.textContent.indexOf(t) >= 0)[0];
+    if (!hit) return false;
+    const btn = hit.querySelector('button[data-action="open"]');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }, title);
+  if (!ok) throw new Error('书架上找不到《' + title + '》');
   await page.waitForSelector('#reader-screen:not([hidden])');
   await sleep(400);
 }
 
 async function backToShelf(page) {
   await page.click('#btn-back');
-  await page.waitForSelector('#shelf-list .shelf-item');
+  await page.waitForSelector('#shelf-grid .book-card');
   await sleep(300);
+}
+
+/**
+ * 排版按钮（字号/行距/页宽/复位）现在都收在顶栏的「Aa」弹出面板里，
+ * Playwright 的 click 要求元素可见 → 点之前先确保面板是打开的。
+ */
+async function typoStep(page, sel, times) {
+  const hidden = await page.$eval('#typo-panel', (el) => el.hidden);
+  if (hidden) {
+    await page.click('#btn-typo');
+    await sleep(150);
+  }
+  for (let i = 0; i < times; i++) {
+    await page.click(sel);
+    await sleep(200);
+  }
 }
 
 async function toastText(page) {
@@ -120,10 +144,7 @@ async function toastText(page) {
 
   console.log('\n① 在《甲书》里放大两档字号');
   await openByTitle(page, '甲书');
-  await page.click('#btn-font-up');
-  await sleep(250);
-  await page.click('#btn-font-up');
-  await sleep(250);
+  await typoStep(page, '#btn-font-up', 2);
   const fontA = await fontOf(page);
   check('甲书字号变大', px(fontA) > px(base), 'true');
   const toastA = await toastText(page);
@@ -135,7 +156,7 @@ async function toastText(page) {
   check('乙书字号 = 甲书字号', await fontOf(page), fontA);
 
   console.log('\n③ 在《乙书》里连缩四档');
-  for (let i = 0; i < 4; i++) { await page.click('#btn-font-down'); await sleep(200); }
+  await typoStep(page, '#btn-font-down', 4);
   const fontB = await fontOf(page);
   check('乙书字号变小', px(fontB) < px(fontA), 'true');
 
@@ -145,13 +166,13 @@ async function toastText(page) {
   check('甲书字号仍是', await fontOf(page), fontA);
 
   console.log('\n⑤ 点「复位」：甲书回到全局值');
-  await page.click('#btn-typo-reset');
+  await typoStep(page, '#btn-typo-reset', 1);
   await sleep(400);
   check('甲书复位后字号', await fontOf(page), fontB);
   check('复位提示语', /已恢复默认排版/.test(await toastText(page)), 'true');
 
   console.log('\n⑥ 已复位后再点一次，应提示「已经是默认排版」而不是报错');
-  await page.click('#btn-typo-reset');
+  await typoStep(page, '#btn-typo-reset', 1);
   await sleep(400);
   check('二次复位提示语', /已经是默认排版/.test(await toastText(page)), 'true');
 

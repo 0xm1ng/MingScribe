@@ -28,6 +28,18 @@ function sizeOf(p) {
   try { return (fs.statSync(p).size / 1024 / 1024).toFixed(2) + ' MB'; } catch (e) { return '?'; }
 }
 
+/**
+ * 字号/行距/页宽按钮现在收在顶栏的「Aa」弹出面板里，
+ * Playwright 的 click 要求元素可见 → 点之前先确保面板是打开的。
+ */
+async function ensureTypoPanel(page) {
+  const hidden = await page.$eval('#typo-panel', (el) => el.hidden);
+  if (hidden) {
+    await page.click('#btn-typo');
+    await page.waitForTimeout(150);
+  }
+}
+
 (async function main() {
   const browser = await chromium.launch({
     executablePath: EDGE,
@@ -293,7 +305,7 @@ function sizeOf(p) {
   log('');
   await page.reload();
   await page.waitForSelector('#shelf-screen:not([hidden])');
-  await page.click('#shelf-list .shelf-item button[data-action="open"]');
+  await page.click('#shelf-grid .book-card button[data-action="open"]');
   await page.waitForFunction(
     () => document.querySelectorAll('#reader-content [data-off]').length > 0,
     null,
@@ -310,10 +322,10 @@ function sizeOf(p) {
   await page.click('#btn-back');
   await page.waitForTimeout(600);
   const shelf = await page.evaluate(() =>
-    Array.prototype.map.call(document.querySelectorAll('#shelf-list .shelf-item'), function (li) {
+    Array.prototype.map.call(document.querySelectorAll('#shelf-grid .book-card'), function (li) {
       return {
-        name: li.querySelector('.shelf-item-name').textContent,
-        meta: li.querySelector('.shelf-item-meta').textContent
+        name: li.querySelector('.book-title').textContent,
+        meta: li.querySelector('.book-meta').textContent
       };
     })
   );
@@ -427,7 +439,7 @@ function sizeOf(p) {
   log('');
   await page.reload();
   await page.waitForSelector('#shelf-screen:not([hidden])');
-  await page.click('#shelf-list .shelf-item button[data-action="open"]');
+  await page.click('#shelf-grid .book-card button[data-action="open"]');
   await page.waitForFunction(
     () => document.querySelectorAll('#reader-content [data-off]').length > 0,
     null,
@@ -454,7 +466,7 @@ function sizeOf(p) {
   await page.waitForSelector('#shelf-screen:not([hidden])');
 
   const openedBig = await page.evaluate((name) => {
-    const items = Array.prototype.slice.call(document.querySelectorAll('#shelf-list .shelf-item'));
+    const items = Array.prototype.slice.call(document.querySelectorAll('#shelf-grid .book-card'));
     const hit = items.filter((li) => li.textContent.indexOf(name) >= 0)[0];
     if (!hit) return false;
     const btn = hit.querySelector('button[data-action="open"]');
@@ -613,6 +625,7 @@ function sizeOf(p) {
   }
 
   // 连按两次放大，每次都检查溢出
+  await ensureTypoPanel(page);
   const zoomTrace = [beforeFont];
   for (let i = 0; i < 2; i++) {
     await page.click('#btn-font-up');
@@ -648,6 +661,7 @@ function sizeOf(p) {
   }
 
   // 缩回原字号
+  await ensureTypoPanel(page);
   await page.click('#btn-font-down');
   await page.waitForTimeout(400);
   await page.click('#btn-font-down');
@@ -662,6 +676,7 @@ function sizeOf(p) {
     overflow: document.getElementById('reader-content').scrollHeight -
       document.getElementById('reader-content').clientHeight
   }));
+  await ensureTypoPanel(page);
   await page.click('#btn-line-up');
   await page.waitForTimeout(450);
   const afterLine = await page.evaluate(() => ({
@@ -727,7 +742,7 @@ function sizeOf(p) {
   await page.reload();
   await page.waitForSelector('#shelf-screen:not([hidden])');
   const reopened = await page.evaluate((name) => {
-    const items = Array.prototype.slice.call(document.querySelectorAll('#shelf-list .shelf-item'));
+    const items = Array.prototype.slice.call(document.querySelectorAll('#shelf-grid .book-card'));
     const hit = items.filter((li) => li.textContent.indexOf(name) >= 0)[0];
     if (!hit) return false;
     hit.querySelector('button[data-action="open"]').click();

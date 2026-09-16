@@ -67,9 +67,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('Updater 模块      :', await page.evaluate(() => !!(window.MingScribe && window.MingScribe.Updater)));
   console.log('isTauri           :', await page.evaluate(() => window.MingScribe.TauriBridge.isTauri()));
   console.log('invoke 可用       :', await page.evaluate(() => typeof (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke)));
-  console.log('书架版本号        :', (await page.textContent('#shelf-version').catch(() => '(取不到)')).trim());
+  console.log('书架版本号        :', (await page.textContent('#about-version').catch(() => '(取不到)')).trim());
 
-  await page.click('#btn-check-update');
+  // 「检查更新」现在在应用栏菜单里
+  await page.click('#btn-menu');
+  await sleep(200);
+  await page.click('#app-menu [data-action="check"]');
   await page.waitForSelector('#toast:not([hidden])', { timeout: 20000 });
   console.log('点击后提示        :', (await page.textContent('#toast')).trim());
 
