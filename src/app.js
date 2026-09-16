@@ -413,6 +413,13 @@
       if (r && r.key) byKey[r.key] = r;
     });
 
+    function coverColors(title) {
+      var h = 0;
+      title = title || '?';
+      for (var i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) % 360;
+      return { c1: 'hsl(' + h + ', 52%, 46%)', c2: 'hsl(' + ((h + 28) % 360) + ', 58%, 30%)' };
+    }
+
     function paint(books) {
       var seen = {};
       var items = [];
@@ -430,36 +437,66 @@
         items.push({ key: r.key, title: r.title || r.name, cached: false, rec: r });
       });
 
-      el.shelfList.innerHTML = '';
+      el.shelfGrid.innerHTML = '';
       el.shelfEmpty.hidden = items.length > 0;
+      el.shelfCount.textContent = items.length ? '共 ' + items.length + ' 本' : '';
 
       var frag = document.createDocumentFragment();
 
-      items.forEach(function (item) {
-        var li = document.createElement('li');
-        li.className = 'shelf-item';
+      // 「添加图书」卡片始终在首位
+      var add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'book-add';
+      add.innerHTML = '<span class="book-add-inner"><span class="plus">＋</span><span>添加图书</span></span>';
+      add.addEventListener('click', function () { if (el.fileInput) el.fileInput.click(); });
+      frag.appendChild(add);
 
-        var main = document.createElement('div');
-        main.className = 'shelf-item-main';
-
-        var nameEl = document.createElement('div');
-        nameEl.className = 'shelf-item-name';
-        nameEl.textContent = item.title;
-        nameEl.title = item.title;
-
-        var metaEl = document.createElement('div');
-        metaEl.className = 'shelf-item-meta';
+      items.forEach(function (item, idx) {
         var rec = item.rec;
         var bits = [];
         if (rec && rec.chapterTitle) bits.push(rec.chapterTitle);
         if (rec) bits.push((Number(rec.percent) || 0).toFixed(1) + '%');
         if (rec && rec.updatedAt) bits.push(formatTime(rec.updatedAt));
-        bits.push(item.cached ? '已缓存 · 直接打开' : '需重新选择文件');
-        metaEl.textContent = bits.join(' · ');
+        bits.push(item.cached ? '已缓存' : '需重新选择文件');
+        var meta = bits.join(' · ');
+        var pct = Number(rec && rec.percent) || 0;
+        var colors = coverColors(item.title);
+        var first = (item.title || '?').trim().charAt(0) || '?';
+        if (/[a-z]/i.test(first)) first = first.toUpperCase();
 
-        main.appendChild(nameEl);
-        main.appendChild(metaEl);
+        var card = document.createElement('div');
+        card.className = 'book-card';
+        card.style.animationDelay = Math.min(idx * 40, 320) + 'ms';
+        card.setAttribute('data-action', 'open');
+        card.setAttribute('data-key', item.key);
+        card.setAttribute('data-name', item.title);
 
+        var cover = document.createElement('div');
+        cover.className = 'book-cover';
+        cover.style.setProperty('--c1', colors.c1);
+        cover.style.setProperty('--c2', colors.c2);
+        var ch = document.createElement('span');
+        ch.className = 'book-cover-char';
+        ch.textContent = first;
+        cover.appendChild(ch);
+
+        var body = document.createElement('div');
+        body.className = 'book-body';
+        var nameEl = document.createElement('div');
+        nameEl.className = 'book-title';
+        nameEl.textContent = item.title;
+        nameEl.title = item.title;
+        var metaEl = document.createElement('div');
+        metaEl.className = 'book-meta';
+        metaEl.textContent = meta;
+        var prog = document.createElement('div');
+        prog.className = 'book-progress';
+        var fill = document.createElement('div');
+        fill.className = 'book-progress-fill';
+        fill.style.width = pct + '%';
+        prog.appendChild(fill);
+        var foot = document.createElement('div');
+        foot.className = 'book-foot';
         var openBtn = document.createElement('button');
         openBtn.type = 'button';
         openBtn.className = 'btn';
@@ -467,21 +504,25 @@
         openBtn.setAttribute('data-action', 'open');
         openBtn.setAttribute('data-key', item.key);
         openBtn.setAttribute('data-name', item.title);
-
         var delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'link-btn';
         delBtn.textContent = '删除';
         delBtn.setAttribute('data-action', 'remove');
         delBtn.setAttribute('data-key', item.key);
+        foot.appendChild(openBtn);
+        foot.appendChild(delBtn);
+        body.appendChild(nameEl);
+        body.appendChild(metaEl);
+        body.appendChild(prog);
+        body.appendChild(foot);
 
-        li.appendChild(main);
-        li.appendChild(openBtn);
-        li.appendChild(delBtn);
-        frag.appendChild(li);
+        card.appendChild(cover);
+        card.appendChild(body);
+        frag.appendChild(card);
       });
 
-      el.shelfList.appendChild(frag);
+      el.shelfGrid.appendChild(frag);
     }
 
     if (bookCache) {
@@ -492,7 +533,7 @@
   }
 
   function onShelfClick(event) {
-    var btn = event.target.closest ? event.target.closest('button[data-action]') : null;
+    var btn = event.target.closest ? event.target.closest('[data-action]') : null;
     if (!btn) return;
 
     var action = btn.getAttribute('data-action');
@@ -2085,7 +2126,7 @@
       if (file) openFile(file, null);
     });
 
-    el.shelfList.addEventListener('click', onShelfClick);
+    el.shelfGrid.addEventListener('click', onShelfClick);
 
     el.clearAll.addEventListener('click', function () {
       if (bookCache) bookCache.clear().catch(function () {});
@@ -2095,7 +2136,6 @@
       toast('已清空全部书籍、阅读记录与划线');
     });
 
-    el.checkUpdateBtn.addEventListener('click', function () { checkForUpdate(true); });
     el.updateClose.addEventListener('click', hideUpdateBar);
     el.updateSkip.addEventListener('click', function () {
       if (state.updateVersion) savePrefs({ skipUpdateVersion: state.updateVersion });
@@ -2110,6 +2150,58 @@
         if (!ok) toast('打不开浏览器，请手动访问：' + el.updateGo.href);
       });
     });
+
+    // 顶部菜单：检查更新 / 关于 / 帮助
+    function closeMenu() {
+      el.appMenu.hidden = true;
+      el.menuBtn.setAttribute('aria-expanded', 'false');
+    }
+    el.menuBtn.addEventListener('click', function (event) {
+      event.stopPropagation();
+      var open = el.appMenu.hidden;
+      el.appMenu.hidden = !open;
+      el.menuBtn.setAttribute('aria-expanded', String(open));
+    });
+    el.appMenu.addEventListener('click', function (event) {
+      var item = event.target.closest('[data-action]');
+      if (!item) return;
+      var action = item.getAttribute('data-action');
+      closeMenu();
+      if (action === 'check') checkForUpdate(true);
+      else if (action === 'about') openModal(el.aboutModal);
+      else if (action === 'help') openModal(el.helpModal);
+    });
+    document.addEventListener('click', function (event) {
+      if (!el.appMenu.hidden && !event.target.closest('.menu-wrap')) closeMenu();
+    });
+
+    // 关于 / 帮助 弹窗
+    function openModal(modal) { modal.hidden = false; }
+    function closeModal(modal) { modal.hidden = true; }
+    [el.aboutModal, el.helpModal].forEach(function (modal) {
+      modal.addEventListener('click', function (event) {
+        if (event.target.hasAttribute('data-close') ||
+            event.target.classList.contains('modal-backdrop')) {
+          closeModal(modal);
+        }
+      });
+    });
+    el.aboutCheck.addEventListener('click', function () { closeModal(el.aboutModal); checkForUpdate(true); });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        if (!el.appMenu.hidden) closeMenu();
+        else if (!el.aboutModal.hidden) closeModal(el.aboutModal);
+        else if (!el.helpModal.hidden) closeModal(el.helpModal);
+      }
+    });
+
+    if (el.themeBtn2) {
+      el.themeBtn2.addEventListener('click', function () {
+        var next = document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        toast(next === 'dark' ? '已切换到夜间模式' : '已切换到日间模式');
+      });
+    }
 
     el.backBtn.addEventListener('click', backToShelf);
     el.prevBtn.addEventListener('click', function () { goChapter(-1); });
@@ -2338,16 +2430,24 @@
     el.readerScreen = $('reader-screen');
     el.openFileBtn = $('btn-open-file');
     el.fileInput = $('file-input');
-    el.shelfList = $('shelf-list');
+    el.shelfGrid = $('shelf-grid');
+    el.shelfCount = $('shelf-count');
     el.shelfEmpty = $('shelf-empty');
     el.clearAll = $('clear-all');
+
+    el.appMenu = $('app-menu');
+    el.menuBtn = $('btn-menu');
+    el.aboutModal = $('about-modal');
+    el.aboutVersion = $('about-version');
+    el.aboutCheck = $('about-check');
+    el.helpModal = $('help-modal');
+    el.themeBtn2 = $('btn-theme-2');
+
     el.updateBar = $('update-bar');
     el.updateText = $('update-text');
     el.updateGo = $('btn-update-go');
     el.updateSkip = $('btn-update-skip');
     el.updateClose = $('btn-update-close');
-    el.checkUpdateBtn = $('btn-check-update');
-    el.shelfVersion = $('shelf-version');
 
     el.readerBookName = $('reader-book-name');
     el.readerChapterName = $('reader-chapter-name');
@@ -2477,7 +2577,7 @@
     applySpreadChrome();
 
     renderShelf();
-    el.shelfVersion.textContent = 'v' + APP_VERSION;
+    if (el.aboutVersion) el.aboutVersion.textContent = '版本 v' + APP_VERSION;
     // 静默检查：一天最多一次，失败也不打扰
     checkForUpdate(false);
     initCache(function () {

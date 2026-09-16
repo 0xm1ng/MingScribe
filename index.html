@@ -9,39 +9,121 @@
 <body>
 
 <section id="shelf-screen" class="screen shelf">
-  <header class="shelf-head">
-    <h1>MingScribe</h1>
-    <p class="sub">纯前端 · 零依赖 · TXT / EPUB / 多格式</p>
+  <header id="app-bar" class="app-bar">
+  <div class="app-bar-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <span class="brand-text">
+        <span class="brand-name">MingScribe</span>
+        <span class="brand-sub">纯前端 · 零依赖电子书阅读器</span>
+      </span>
+    </div>
+    <div class="app-actions">
+      <button id="btn-theme-2" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
+      <div class="menu-wrap">
+        <button id="btn-menu" class="icon-btn menu-btn" type="button" aria-haspopup="true" aria-expanded="false" title="菜单">☰</button>
+        <div id="app-menu" class="menu" role="menu" hidden>
+          <button class="menu-item" role="menuitem" data-action="check">检查更新</button>
+          <button class="menu-item" role="menuitem" data-action="about">关于 MingScribe</button>
+          <button class="menu-item" role="menuitem" data-action="help">快捷键 / 帮助</button>
+        </div>
+      </div>
+    </div>
+  </div>
   </header>
+  <div id="update-bar" class="update-banner" hidden>
+    <span class="ub-icon" aria-hidden="true">⤓</span>
+    <span id="update-text" class="ub-text"></span>
+    <span class="ub-actions">
+      <a id="btn-update-go" class="link-btn" href="https://github.com/0xm1ng/MingScribe/releases" target="_blank" rel="noopener">去下载</a>
+      <button id="btn-update-skip" class="link-btn" type="button">忽略此版本</button>
+      <button id="btn-update-close" class="link-btn" type="button">关闭</button>
+    </span>
+  </div>
 
-  <button id="btn-open-file" class="btn btn-primary btn-block" type="button">选择电子书文件</button>
+  <div class="shelf-toolbar">
+    <div class="shelf-title">
+      <h2>我的书架</h2>
+      <span id="shelf-count" class="muted"></span>
+    </div>
+    <div class="toolbar-actions">
+      <button id="btn-open-file" class="btn btn-primary" type="button">＋ 添加图书</button>
+      <button id="clear-all" class="link-btn" type="button">清空书架</button>
+    </div>
+  </div>
+
+  <div id="shelf-grid" class="shelf-grid"></div>
+  <p id="shelf-empty" class="empty">书架还是空的。点「＋ 添加图书」选一个 TXT 或 EPUB 文件开始吧。</p>
+
+  <div class="feature-strip">
+    <div class="feature">
+      <span class="f-icon" aria-hidden="true">🔒</span>
+      <div class="f-text"><strong>本地隐私</strong><em>文件只在你设备上读取，绝不上传任何服务器</em></div>
+    </div>
+    <div class="feature">
+      <span class="f-icon" aria-hidden="true">📚</span>
+      <div class="f-text"><strong>十余种格式</strong><em>TXT / EPUB / MOBI / DOCX 等统一阅读</em></div>
+    </div>
+    <div class="feature">
+      <span class="f-icon" aria-hidden="true">🖍️</span>
+      <div class="f-text"><strong>划线与批注</strong><em>四种颜色高亮，一键导出 Markdown</em></div>
+    </div>
+    <div class="feature">
+      <span class="f-icon" aria-hidden="true">⤓</span>
+      <div class="f-text"><strong>自动更新</strong><em>有新版本时在书架提醒你，一键去下载</em></div>
+    </div>
+  </div>
+
   <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip,.mobi,.azw,.azw3,.kfx,.doc,.docx,.rtf,.odt,.html,.htm,.fb2,.lit,.pdb,.prc,.snb,.cbr,.cbz" hidden />
-  <p class="hint">
-    网页版支持 TXT（自动识别 UTF-8 / GB18030 编码）与 EPUB 电子书。<br />
-    <strong>桌面版</strong>还可在内部经 Calibre 转换后直接打开 MOBI / AZW3 / DOCX / FB2 等格式。<br />
-    首次选择后会自动记住这本书，下次在书架上点一下直接继续阅读。<br />
-    文件仅在你的浏览器本地读取，不会上传到任何服务器。
-  </p>
-
-  <div class="list-head">
-    <h2>我的书架</h2>
-    <button id="clear-all" class="link-btn" type="button">清空书架</button>
-  </div>
-  <ul id="shelf-list" class="shelf-list"></ul>
-  <p id="shelf-empty" class="empty">书架还是空的。选一个 TXT 或 EPUB 文件开始吧。</p>
-
-  <div id="update-bar" class="update-bar" hidden>
-    <span id="update-text"></span>
-    <a id="btn-update-go" class="link-btn" href="https://github.com/0xm1ng/MingScribe/releases" target="_blank" rel="noopener">去下载</a>
-    <button id="btn-update-skip" class="link-btn" type="button">忽略此版本</button>
-    <button id="btn-update-close" class="link-btn" type="button">关闭</button>
-  </div>
-
-  <p class="shelf-foot">
-    <button id="btn-check-update" class="link-btn" type="button">检查更新</button>
-    <span id="shelf-version" class="muted"></span>
-  </p>
 </section>
+
+<div id="about-modal" class="modal" hidden>
+  <div class="modal-backdrop" data-close="about"></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="about-title">
+    <div class="about-head">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <div class="about-head-text">
+        <h3 id="about-title">MingScribe</h3>
+        <p class="muted" id="about-version">版本 v0.1.1</p>
+      </div>
+      <button class="icon-btn modal-close" type="button" data-close="about" title="关闭">✕</button>
+    </div>
+    <p class="about-desc">纯前端、零依赖的电子书阅读器。文件只在你本地读取，不上传任何服务器；TXT / EPUB 及十余种格式统一阅读、统一进度与划线。</p>
+    <ul class="about-links">
+      <li><a href="https://github.com/0xm1ng/MingScribe" target="_blank" rel="noopener">GitHub 仓库</a></li>
+      <li><a href="https://github.com/0xm1ng/MingScribe/releases" target="_blank" rel="noopener">下载更新</a></li>
+    </ul>
+    <div class="about-foot">
+      <button id="about-check" class="btn btn-primary" type="button">检查更新</button>
+      <button class="link-btn" type="button" data-close="about">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div id="help-modal" class="modal" hidden>
+  <div class="modal-backdrop" data-close="help"></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="about-head">
+      <span class="brand-mark" aria-hidden="true">⌘</span>
+      <div class="about-head-text">
+        <h3 id="help-title">快捷键 / 帮助</h3>
+      </div>
+      <button class="icon-btn modal-close" type="button" data-close="help" title="关闭">✕</button>
+    </div>
+    <ul class="help-list">
+      <li><span>Ctrl/Cmd + F</span><em>搜索正文</em></li>
+      <li><span>Ctrl/Cmd + M</span><em>我的划线</em></li>
+      <li><span>← / →</span><em>上一页 / 下一页（分页模式）</em></li>
+      <li><span>空格</span><em>向下翻一屏</em></li>
+      <li><span>选中文字</span><em>弹出划线 / 批注工具条</em></li>
+      <li><span>拖动底部进度条</span><em>跳转全书任意位置</em></li>
+    </ul>
+    <div class="about-foot">
+      <button class="link-btn" type="button" data-close="help">关闭</button>
+    </div>
+  </div>
+</div>
+
 
 <section id="reader-screen" class="screen reader" hidden>
   <header class="reader-bar">

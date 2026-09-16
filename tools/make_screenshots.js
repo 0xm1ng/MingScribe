@@ -276,7 +276,7 @@ async function makeHighlight(page, opts) {
   await settle(page, 800);
   // 书架内容只占屏幕上部，裁掉下方空白，README 里更紧凑
   await shot(page, '01-shelf', { x: 0, y: 0, width: 1440, height: 700 });
-  step('11. 书架条目数：' + await page.locator('#shelf-list li').count());
+  step('11. 书架卡片数：' + await page.locator('#shelf-grid .book-card').count());
 
   /* ---------- 收尾 ---------- */
   step('');

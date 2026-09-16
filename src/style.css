@@ -17,6 +17,11 @@
   --reader-line-height: 1.85;
   /* 分页模式下正文一行的最大宽度。比一屏短一截，回到「书页」的阅读体验 */
   --page-width: 36em;
+
+  /* 动效曲线：进入用 ease-out、悬停/颜色用 ease（来自动画设计准则） */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
 }
 
 body[data-theme="dark"] {
@@ -40,34 +45,292 @@ html, body {
 
 body {
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 16px;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s var(--ease), color 0.25s var(--ease);
 }
 
 .screen[hidden] { display: none; }
 
+/* ---------- 顶部应用栏 ---------- */
+
+.app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: saturate(180%) blur(10px);
+}
+
+.app-bar-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  height: 60px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #000));
+  box-shadow: 0 5px 14px -5px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.brand-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.brand-name { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+.brand-sub { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+
+.app-actions { display: flex; align-items: center; gap: 6px; }
+
+.menu-wrap { position: relative; }
+
+.menu-btn { font-size: 17px; line-height: 1; }
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 184px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px -16px rgba(0, 0, 0, .38);
+  transform-origin: top right;
+  animation: menu-in 160ms var(--ease-out) both;
+  z-index: 40;
+}
+.menu[hidden] { display: none; }
+
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.menu-item:hover { background: var(--accent-soft); color: var(--accent); }
+
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(.96) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
 /* ---------- 书架 ---------- */
 
 .shelf {
-  max-width: 720px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 56px 24px 40px;
+  padding: 28px 24px 56px;
 }
 
-.shelf-head h1 {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-}
-
-.shelf-head .sub {
-  margin: 6px 0 32px;
-  color: var(--text-muted);
+/* 更新提示：做成书架顶部的一条横幅，不挤占主流程 */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 24px;
+  padding: 12px 16px;
   font-size: 14px;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
 }
+.update-banner[hidden] { display: none; }
+.ub-icon { font-size: 18px; color: var(--accent); }
+.ub-text { flex: 1; min-width: 0; }
+.ub-actions { display: flex; align-items: center; gap: 14px; }
+
+.shelf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 20px;
+}
+
+.shelf-title { display: flex; align-items: baseline; gap: 10px; }
+.shelf-title h2 { margin: 0; font-size: 21px; font-weight: 600; letter-spacing: .3px; }
+
+.toolbar-actions { display: flex; align-items: center; gap: 14px; }
+
+.shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+  gap: 20px;
+}
+
+.book-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease), border-color 180ms var(--ease);
+  animation: card-in 340ms var(--ease-out) both;
+}
+.book-card:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 18px 36px -18px rgba(0, 0, 0, .42);
+}
+.book-card:active { transform: translateY(-1px) scale(.992); }
+
+.book-cover {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(150deg, var(--c1, var(--accent)), var(--c2, color-mix(in srgb, var(--accent) 55%, #000)));
+  color: #fff;
+  overflow: hidden;
+}
+.book-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 80% at 100% 0%, rgba(255, 255, 255, .22), transparent 60%);
+}
+.book-cover-char {
+  font-size: 46px;
+  font-weight: 700;
+  opacity: .92;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, .25);
+}
+
+.book-body { display: flex; flex-direction: column; gap: 6px; padding: 12px 13px 13px; }
+.book-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  max-height: 2.7em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.book-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  min-height: 1.4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book-progress {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 2px;
+}
+.book-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s var(--ease); }
+.book-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.book-foot .btn { padding: 6px 13px; font-size: 13px; }
+
+/* 添加图书卡片 */
+.book-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 248px;
+  background: transparent;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 180ms var(--ease), border-color 180ms var(--ease), color 180ms var(--ease), background 180ms var(--ease);
+  animation: card-in 340ms var(--ease-out) both;
+}
+.book-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-4px);
+}
+.book-add-inner { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.book-add-inner .plus { font-size: 34px; line-height: 1; font-weight: 300; }
+
+.empty {
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 44px 4px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  margin-top: 18px;
+}
+
+/* 书架底部特性横幅：填充版面，也把核心卖点常驻在眼前 */
+.feature-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+  margin-top: 34px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
+}
+
+.feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.f-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  font-size: 16px;
+  background: var(--accent-soft);
+}
+
+.f-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.f-text strong { font-size: 14px; font-weight: 600; }
+.f-text em { font-style: normal; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* ---------- 通用按钮（阅读界面复用） ---------- */
 
 .btn {
   font-family: inherit;
@@ -78,7 +341,7 @@ body {
   border-radius: var(--radius);
   padding: 9px 16px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .btn:hover { border-color: var(--accent); }
@@ -107,54 +370,6 @@ body {
   pointer-events: none;
 }
 
-.hint {
-  margin: 12px 0 40px;
-  font-size: 13px;
-  color: var(--text-muted);
-  line-height: 1.7;
-}
-
-/* 新版本提示条：放在书架底部，不打断「选书 → 读书」的主流程 */
-.update-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin: 20px 0 0;
-  padding: 10px 14px;
-  font-size: 13px;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 8px;
-}
-
-.update-bar[hidden] { display: none; }
-
-.shelf-foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 14px 0 40px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.list-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 10px;
-}
-
-.list-head h2 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-}
-
 .link-btn {
   font-family: inherit;
   font-size: 13px;
@@ -163,43 +378,56 @@ body {
   border: none;
   padding: 0;
   cursor: pointer;
+  transition: color 0.15s var(--ease);
 }
 
 .link-btn:hover { color: var(--accent); }
 
-.shelf-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ---------- 弹窗（关于 / 帮助） ---------- */
+
+.modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; }
+.modal[hidden] { display: none; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .42); animation: fade-in 160ms ease both; }
+.modal-card {
+  position: relative;
+  width: min(440px, 100%);
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 30px 70px -24px rgba(0, 0, 0, .5);
+  animation: modal-in 200ms var(--ease-out) both;
 }
+.about-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.about-head-text { flex: 1; min-width: 0; }
+.about-head-text h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.modal-close { margin-left: auto; font-size: 15px; }
+.about-desc { font-size: 13.5px; line-height: 1.7; color: var(--text); margin: 0 0 14px; }
+.about-links { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.about-links a { color: var(--accent); font-size: 13.5px; text-decoration: none; }
+.about-links a:hover { text-decoration: underline; }
+.about-foot { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 
-.shelf-item {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 2px;
-  border-bottom: 1px solid var(--border);
+.help-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.help-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 4px; border-bottom: 1px solid var(--border); font-size: 13.5px;
 }
-
-.shelf-item-main { flex: 1; min-width: 0; }
-
-.shelf-item-name {
-  font-size: 15px;
-  margin-bottom: 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.help-list li:last-child { border-bottom: none; }
+.help-list span {
+  font-family: var(--font-mono);
+  font-size: 12px; color: var(--accent);
+  background: var(--accent-soft); padding: 4px 9px; border-radius: 6px; white-space: nowrap;
 }
+.help-list em { color: var(--text-muted); font-style: normal; text-align: right; }
 
-.shelf-item-meta {
-  font-size: 12.5px;
-  color: var(--text-muted);
-}
+@keyframes card-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 
-.empty {
-  font-size: 13.5px;
-  color: var(--text-muted);
-  padding: 24px 2px;
+@media (prefers-reduced-motion: reduce) {
+  .book-card, .book-add, .menu, .modal-backdrop, .modal-card { animation: none; }
+  .book-card:hover, .book-add:hover { transform: none; }
 }
 
 /* ---------- 阅读器 ---------- */
