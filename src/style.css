@@ -65,14 +65,16 @@ body {
   backdrop-filter: saturate(180%) blur(10px);
 }
 
+/* 顶栏通栏：品牌贴左、操作贴右，不居中留白（留白会被看成"没做完"） */
 .app-bar-inner {
-  max-width: 1180px;
-  margin: 0 auto;
-  height: 60px;
-  padding: 0 24px;
+  width: 100%;
+  height: 64px;
+  /* 与书架的横向留白用同一个变量，两边才能对齐 */
+  padding: 0 var(--shelf-pad, 28px);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 20px;
 }
 
 .brand {
@@ -144,11 +146,16 @@ body {
 
 /* ---------- 书架 ---------- */
 
+/* 书架与顶栏同样通栏，左右边距对齐，视觉上是一整块。
+   横向留白做成变量，顶栏靠负 margin 抵掉它 —— 否则顶栏那一条白底
+   会被书架的 padding 夹在中间，看着像"只画了一半"。 */
 .shelf {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 28px 24px 56px;
+  --shelf-pad: 28px;
+  width: 100%;
+  padding: 0 var(--shelf-pad) 64px;
 }
+
+.app-bar { margin: 0 calc(-1 * var(--shelf-pad)); }
 
 /* 更新提示：做成书架顶部的一条横幅，不挤占主流程 */
 .update-banner {
@@ -156,7 +163,7 @@ body {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin: 0 0 24px;
+  margin: 22px 0 0;
   padding: 12px 16px;
   font-size: 14px;
   color: var(--text);
@@ -175,7 +182,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 0 0 20px;
+  /* 上边距给足：标题行紧贴导航栏会显得很挤 */
+  margin: 46px 0 22px;
 }
 
 .shelf-title { display: flex; align-items: baseline; gap: 10px; }
@@ -185,81 +193,278 @@ body {
 
 .shelf-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
+  gap: 22px;
+  align-items: stretch;
 }
 
+/* 卡片：正面 = 封面 + 信息，背面 = 详情 + 操作。
+   桌面靠 hover / 键盘聚焦翻面，正面因此能保持干净。
+   注意 .book-card 与 .book-inner 都不能设 overflow:hidden —— 那会毁掉 preserve-3d，
+   圆角与裁剪交给 .book-face。 */
 .book-card {
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease), border-color 180ms var(--ease);
+  perspective: 1500px;
   animation: card-in 340ms var(--ease-out) both;
 }
-.book-card:hover {
-  transform: translateY(-4px);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  box-shadow: 0 18px 36px -18px rgba(0, 0, 0, .42);
-}
-.book-card:active { transform: translateY(-1px) scale(.992); }
 
+.book-inner {
+  position: relative;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 620ms var(--ease-out);
+}
+
+.book-face {
+  border-radius: 14px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease);
+}
+
+.book-card:hover .book-face,
+.book-card:focus-within .book-face {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 20px 40px -20px rgba(0, 0, 0, .45);
+}
+
+.book-front {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* ---------- 封面 ---------- */
 .book-cover {
   position: relative;
+  flex: none;
   aspect-ratio: 3 / 4;
   display: grid;
   place-items: center;
-  background: linear-gradient(150deg, var(--c1, var(--accent)), var(--c2, color-mix(in srgb, var(--accent) 55%, #000)));
+  padding: 20px 16px;
   color: #fff;
   overflow: hidden;
-}
-.book-cover::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(120% 80% at 100% 0%, rgba(255, 255, 255, .22), transparent 60%);
-}
-.book-cover-char {
-  font-size: 46px;
-  font-weight: 700;
-  opacity: .92;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, .25);
+  /* 三层：高光 → 图案纹理 → 底色渐变。--pat 缺失时整条声明会失效，所以给 none 兜底 */
+  background-image:
+    radial-gradient(130% 78% at 100% 0%, rgba(255, 255, 255, .22), transparent 62%),
+    var(--pat, none),
+    linear-gradient(155deg, var(--c1, var(--accent)), var(--c2, #123));
+  background-size: auto, var(--pat-size, auto), auto;
+  background-repeat: no-repeat, repeat, no-repeat;
 }
 
-.book-body { display: flex; flex-direction: column; gap: 6px; padding: 12px 13px 13px; }
+/* 书脊：左侧一条竖向暗渐变，让封面看起来是「装订过的书」而不是一块色板 */
+.book-cover::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 13px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, .36), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
+.cover-watermark {
+  position: absolute;
+  right: -16px;
+  bottom: -38px;
+  font-family: var(--font-serif);
+  font-size: 134px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: .1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cover-art {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: center;
+}
+.cover-rule {
+  width: 26px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .75);
+}
+.cover-name {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  line-height: 1.42;
+  letter-spacing: .5px;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, .38);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.cover-ext {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.6px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, .5);
+  border-radius: 999px;
+  opacity: .88;
+}
+
+/* ---------- 信息区 ---------- */
+.book-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+  padding: 13px 14px 14px;
+}
 .book-title {
   font-size: 14.5px;
   font-weight: 600;
-  line-height: 1.35;
-  max-height: 2.7em;
+  line-height: 1.4;
+  min-height: 2.8em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+/* 章节 / 进度 / 时间分行摆：挤一行会互相抢宽度，谁都读不全 */
 .book-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   font-size: 12px;
   color: var(--text-muted);
-  line-height: 1.4;
-  min-height: 1.4em;
+  line-height: 1.45;
+}
+.bm-chapter {
+  min-height: 1.45em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.bm-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bm-pct { font-weight: 600; color: var(--accent); }
+.bm-time { font-size: 11.5px; white-space: nowrap; }
+
 .book-progress {
   height: 5px;
   border-radius: 3px;
   background: var(--border);
   overflow: hidden;
-  margin-top: 2px;
+  margin-top: auto;
 }
 .book-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s var(--ease); }
+
 .book-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
 .book-foot .btn { padding: 6px 13px; font-size: 13px; }
+
+/* ---------- 背面 ---------- */
+.book-back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px 15px;
+  color: #fff;
+  background-image:
+    radial-gradient(120% 70% at 100% 0%, rgba(255, 255, 255, .18), transparent 62%),
+    var(--pat, none),
+    linear-gradient(155deg, var(--c3, #234), var(--c4, #112));
+  background-size: auto, var(--pat-size, auto), auto;
+  background-repeat: no-repeat, repeat, no-repeat;
+  border-color: transparent;
+}
+.back-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.42;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.back-pct { margin: 0; display: flex; align-items: baseline; gap: 5px; }
+.back-pct strong { font-size: 33px; font-weight: 700; line-height: 1; letter-spacing: -.5px; }
+.back-pct span { font-size: 12.5px; opacity: .8; }
+
+.back-facts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding-top: 11px;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 255, 255, .22);
+  font-size: 12.5px;
+}
+.back-facts > div { display: flex; gap: 8px; min-width: 0; }
+.back-facts dt { flex: none; width: 28px; opacity: .62; }
+.back-facts dd {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 操作竖排并占满宽度：横排两个小按钮压在底部会显得空 */
+.back-foot { flex-direction: column; align-items: stretch; gap: 4px; margin: 0; }
+.back-btn {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0b231c;
+  background: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: transform 120ms var(--ease), opacity 160ms var(--ease);
+}
+.back-btn:hover { opacity: .88; }
+.back-btn:active { transform: scale(.97); }
+.back-del {
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: center;
+  color: rgba(255, 255, 255, .82);
+  background: none;
+  border: none;
+  padding: 7px 4px;
+  cursor: pointer;
+}
+.back-del:hover { color: #fff; text-decoration: underline; }
+
+/* 只有能「悬停」的设备才翻面：触屏翻不过去，背面干脆不参与渲染，
+   正面照旧带完整操作按钮。 */
+@media (hover: hover) {
+  .book-card:hover .book-inner,
+  .book-card:focus-within .book-inner {
+    transform: translateY(-4px) rotateY(180deg);
+  }
+  .book-card:active .book-inner { transform: translateY(-1px) scale(.995); }
+}
+
+@media (hover: none) {
+  .book-back { display: none; }
+}
 
 /* 添加图书卡片 */
 .book-add {
@@ -314,40 +519,72 @@ body {
   color: var(--text-muted);
 }
 
-/* 书架底部特性横幅：填充版面，也把核心卖点常驻在眼前 */
+/* 书架底部特性条：四张卡片，每张都是一个真链接（点开有去处），
+   内容也不止一行标题 —— 卖点下面补一行具体信息，卡片才不像空壳。 */
 .feature-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
   gap: 14px;
-  margin-top: 34px;
-  padding-top: 26px;
+  margin-top: 44px;
+  padding-top: 30px;
   border-top: 1px solid var(--border);
 }
 
 .feature {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 11px;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 16px 40px 16px 16px;
+  color: inherit;
+  text-decoration: none;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
+  transition: transform 180ms var(--ease), border-color 180ms var(--ease),
+              box-shadow 180ms var(--ease), background 180ms var(--ease);
 }
+.feature:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  box-shadow: 0 16px 32px -18px rgba(0, 0, 0, .38);
+}
+.feature:active { transform: translateY(-1px) scale(.995); }
+.feature:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .f-icon {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 9px;
-  font-size: 16px;
+  border-radius: 10px;
+  font-size: 17px;
   background: var(--accent-soft);
 }
 
-.f-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.f-text strong { font-size: 14px; font-weight: 600; }
-.f-text em { font-style: normal; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.f-body { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.f-body strong { font-size: 14.5px; font-weight: 600; }
+.f-body em { font-style: normal; font-size: 12.5px; color: var(--text-muted); line-height: 1.55; }
+.f-tags {
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  opacity: .9;
+  word-break: break-word;
+}
+
+.f-arrow {
+  position: absolute;
+  top: 17px;
+  right: 15px;
+  font-size: 15px;
+  color: var(--text-muted);
+  transition: transform 180ms var(--ease), color 180ms var(--ease);
+}
+.feature:hover .f-arrow { transform: translateX(3px); color: var(--accent); }
 
 /* ---------- 通用按钮（阅读界面复用） ---------- */
 
@@ -451,8 +688,24 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .book-card, .book-add, .menu, .modal-backdrop, .modal-card { animation: none; }
-  .book-card:hover, .book-add:hover { transform: none; }
+  .book-card:hover, .book-add:hover, .feature:hover { transform: none; }
   .btn:active:not(:disabled), .step-btn:active { transform: none; }
+  .book-inner { transition: none; }
+}
+
+/* 不做 3D 旋转（会晕），改成直接换面：悬停 / 聚焦时把背面叠上来。
+   必须保留「能翻到操作」这件事，否则关掉动效的人就删不掉书了。 */
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .book-card:hover .book-inner,
+  .book-card:focus-within .book-inner { transform: none; }
+  .book-back {
+    transform: none;
+    backface-visibility: visible;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .book-card:hover .book-back,
+  .book-card:focus-within .book-back { opacity: 1; pointer-events: auto; }
 }
 
 /* ---------- 阅读器 ---------- */
@@ -1331,5 +1584,7 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
   .page-frame { padding: 22px 16px 40px; }
   /* 窄屏下翻页热区太占地方，靠键盘/滑动即可 */
   .page-edge { display: none; }
-  .shelf { padding: 28px 18px 32px; }
+  .brand-sub { display: none; }
+  .shelf { --shelf-pad: 16px; padding-bottom: 48px; }
+  .shelf-toolbar { flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 }

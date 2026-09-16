@@ -29,7 +29,7 @@
    * 当前版本号。**必须与 package.json / src-tauri/tauri.conf.json 三处一致**——
    * tests/updater.test.js 里有一条测试专门守这件事，改了不同步会直接测试失败。
    */
-  var APP_VERSION = '0.1.1';
+  var APP_VERSION = '0.2.0';
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
@@ -430,6 +430,63 @@
 
   /* ---------------- 书架 ---------------- */
 
+  /** 从文件名里取扩展名，用于封面角标和背面「格式」一行。 */
+  function fileExt(name) {
+    var m = String(name || '').match(/\.([a-z0-9]{1,5})$/i);
+    return m ? m[1].toUpperCase() : '';
+  }
+
+  /**
+   * 当前设备有没有「悬停」这件事。
+   * 有 → 卡片靠 hover 翻到背面，操作按钮放背面，正面保持干净。
+   * 没有（平板 / 手机）→ 翻不过去，操作按钮必须留在正面。
+   */
+  function hasHover() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(hover: hover)').matches);
+    } catch (err) {
+      return true;
+    }
+  }
+
+  /** 一本书的「打开 / 删除」按钮组；样式类由调用方给，正面与背面各用各的。 */
+  function bookFoot(item, openCls, delCls) {
+    var foot = document.createElement('div');
+    foot.className = 'book-foot';
+
+    var openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = openCls;
+    openBtn.textContent = item.rec ? '继续阅读' : '开始阅读';
+    openBtn.setAttribute('data-action', 'open');
+    openBtn.setAttribute('data-key', item.key);
+    openBtn.setAttribute('data-name', item.title);
+
+    var delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = delCls;
+    delBtn.textContent = '删除';
+    delBtn.setAttribute('data-action', 'remove');
+    delBtn.setAttribute('data-key', item.key);
+
+    foot.appendChild(openBtn);
+    foot.appendChild(delBtn);
+    return foot;
+  }
+
+  /** 背面详情表的一行（<dl> 里用 <div> 包 <dt>/<dd> 是合法的）。 */
+  function backFact(label, value) {
+    var row = document.createElement('div');
+    var dt = document.createElement('dt');
+    dt.textContent = label;
+    var dd = document.createElement('dd');
+    dd.textContent = value;
+    dt.title = value;
+    row.appendChild(dt);
+    row.appendChild(dd);
+    return row;
+  }
+
   function renderShelf() {
     var progressList = store.list();
     var byKey = {};
@@ -444,14 +501,26 @@
       (books || []).forEach(function (b) {
         if (!b || !b.key || seen[b.key]) return;
         seen[b.key] = true;
-        items.push({ key: b.key, title: b.title || b.name, cached: true, rec: byKey[b.key] || null });
+        items.push({
+          key: b.key,
+          title: b.title || b.name,
+          name: b.name || '',
+          cached: true,
+          rec: byKey[b.key] || null
+        });
       });
 
       // 进度里有、但缓存中没有的（缓存被清或写入失败）：仍列出，打开时需重新选文件
       progressList.forEach(function (r) {
         if (!r || !r.key || seen[r.key]) return;
         seen[r.key] = true;
-        items.push({ key: r.key, title: r.title || r.name, cached: false, rec: r });
+        items.push({
+          key: r.key,
+          title: r.title || r.name,
+          name: r.name || '',
+          cached: false,
+          rec: r
+        });
       });
 
       el.shelfGrid.innerHTML = '';
@@ -472,72 +541,145 @@
 
       items.forEach(function (item, idx) {
         var rec = item.rec;
-        var bits = [];
-        if (rec && rec.chapterTitle) bits.push(rec.chapterTitle);
-        if (rec) bits.push((Number(rec.percent) || 0).toFixed(1) + '%');
-        if (rec && rec.updatedAt) bits.push(formatTime(rec.updatedAt));
-        bits.push(item.cached ? '已缓存' : '需重新选择文件');
-        var meta = bits.join(' · ');
-        var pct = Number(rec && rec.percent) || 0;
+        var pct = Math.max(0, Math.min(100, Number(rec && rec.percent) || 0));
         var colors = Cover.colorFor(item.title);
-        var first = (item.title || '?').trim().charAt(0) || '?';
-        if (/[a-z]/i.test(first)) first = first.toUpperCase();
+        var art = Cover.artFor(item.title);
+        var ext = fileExt(item.name || item.title);
+        var chapter = (rec && rec.chapterTitle) || (rec ? '尚未开始阅读' : '需要重新选择文件');
+        var when = (rec && rec.updatedAt) ? formatTime(rec.updatedAt) : '—';
 
         var card = document.createElement('div');
         card.className = 'book-card';
         card.style.animationDelay = Math.min(idx * 40, 320) + 'ms';
-        card.setAttribute('data-action', 'open');
         card.setAttribute('data-key', item.key);
         card.setAttribute('data-name', item.title);
+
+        var inner = document.createElement('div');
+        inner.className = 'book-inner';
+
+        /* ---------- 正面：封面 + 图书信息 ---------- */
+        var front = document.createElement('div');
+        front.className = 'book-face book-front';
+        front.setAttribute('data-action', 'open');
+        front.setAttribute('data-key', item.key);
+        front.setAttribute('data-name', item.title);
 
         var cover = document.createElement('div');
         cover.className = 'book-cover';
         cover.style.setProperty('--c1', colors.c1);
         cover.style.setProperty('--c2', colors.c2);
-        var ch = document.createElement('span');
-        ch.className = 'book-cover-char';
-        ch.textContent = first;
-        cover.appendChild(ch);
+        cover.style.setProperty('--c3', 'hsl(' + colors.h2 + ', 42%, 21%)');
+        cover.style.setProperty('--c4', 'hsl(' + colors.h1 + ', 46%, 13%)');
+        cover.style.setProperty('--pat', art.patternCss);
+        cover.style.setProperty('--pat-size', art.patternSize);
+        cover.setAttribute('data-genre', art.genre);
+        cover.setAttribute('data-pattern', art.pattern);
+
+        var watermark = document.createElement('span');
+        watermark.className = 'cover-watermark';
+        watermark.setAttribute('aria-hidden', 'true');
+        watermark.textContent = art.initial;
+
+        var artBox = document.createElement('span');
+        artBox.className = 'cover-art';
+        var rule = document.createElement('span');
+        rule.className = 'cover-rule';
+        var coverName = document.createElement('span');
+        coverName.className = 'cover-name';
+        coverName.style.fontSize = art.nameSize + 'px';
+        coverName.textContent = item.title;
+        var extTag = document.createElement('span');
+        extTag.className = 'cover-ext';
+        extTag.textContent = ext || (item.cached ? 'BOOK' : '离线');
+        artBox.appendChild(rule);
+        artBox.appendChild(coverName);
+        artBox.appendChild(extTag);
+        cover.appendChild(watermark);
+        cover.appendChild(artBox);
 
         var body = document.createElement('div');
         body.className = 'book-body';
+
         var nameEl = document.createElement('div');
         nameEl.className = 'book-title';
         nameEl.textContent = item.title;
         nameEl.title = item.title;
+
+        // 信息分三行摆：章节 → 进度与时间 → 进度条。挤在一行会互相抢宽度。
         var metaEl = document.createElement('div');
         metaEl.className = 'book-meta';
-        metaEl.textContent = meta;
+        var chapterEl = document.createElement('span');
+        chapterEl.className = 'bm-chapter';
+        chapterEl.textContent = chapter;
+        chapterEl.title = chapter;
+        var lineEl = document.createElement('span');
+        lineEl.className = 'bm-line';
+        var pctEl = document.createElement('span');
+        pctEl.className = 'bm-pct';
+        pctEl.textContent = pct.toFixed(1) + '%';
+        var timeEl = document.createElement('span');
+        timeEl.className = 'bm-time';
+        timeEl.textContent = when;
+        lineEl.appendChild(pctEl);
+        lineEl.appendChild(timeEl);
+        metaEl.appendChild(chapterEl);
+        metaEl.appendChild(lineEl);
+
         var prog = document.createElement('div');
         prog.className = 'book-progress';
         var fill = document.createElement('div');
         fill.className = 'book-progress-fill';
         fill.style.width = pct + '%';
         prog.appendChild(fill);
-        var foot = document.createElement('div');
-        foot.className = 'book-foot';
-        var openBtn = document.createElement('button');
-        openBtn.type = 'button';
-        openBtn.className = 'btn';
-        openBtn.textContent = rec ? '继续阅读' : '开始阅读';
-        openBtn.setAttribute('data-action', 'open');
-        openBtn.setAttribute('data-key', item.key);
-        openBtn.setAttribute('data-name', item.title);
-        var delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'link-btn';
-        delBtn.textContent = '删除';
-        delBtn.setAttribute('data-action', 'remove');
-        delBtn.setAttribute('data-key', item.key);
-        foot.appendChild(openBtn);
-        foot.appendChild(delBtn);
+
         body.appendChild(nameEl);
         body.appendChild(metaEl);
         body.appendChild(prog);
-        body.appendChild(foot);
+        // 触屏没有 hover，卡片翻不到背面，操作按钮得留在正面
+        if (!hasHover()) body.appendChild(bookFoot(item, 'btn', 'link-btn'));
 
-        card.appendChild(cover);
-        card.appendChild(body);
+        front.appendChild(cover);
+        front.appendChild(body);
+
+        /* ---------- 背面：详情 + 操作 ---------- */
+        var back = document.createElement('div');
+        back.className = 'book-face book-back';
+        back.style.setProperty('--c3', 'hsl(' + colors.h2 + ', 42%, 22%)');
+        back.style.setProperty('--c4', 'hsl(' + colors.h1 + ', 46%, 14%)');
+        // 背面沿用同一套图案纹理，翻过去才像同一本书的封底
+        back.style.setProperty('--pat', art.patternCss);
+        back.style.setProperty('--pat-size', art.patternSize);
+
+        var backTitle = document.createElement('p');
+        backTitle.className = 'back-title';
+        backTitle.textContent = item.title;
+
+        var backPct = document.createElement('p');
+        backPct.className = 'back-pct';
+        var backNum = document.createElement('strong');
+        backNum.textContent = pct.toFixed(0);
+        var backUnit = document.createElement('span');
+        backUnit.textContent = '% 已读';
+        backPct.appendChild(backNum);
+        backPct.appendChild(backUnit);
+
+        var facts = document.createElement('dl');
+        facts.className = 'back-facts';
+        facts.appendChild(backFact('章节', chapter));
+        facts.appendChild(backFact('上次', when));
+        facts.appendChild(backFact('格式', (ext || '未知') + ' · ' + (item.cached ? '已缓存' : '待重新选择')));
+
+        var foot = bookFoot(item, 'back-btn', 'back-del');
+        foot.className = 'book-foot back-foot';
+
+        back.appendChild(backTitle);
+        back.appendChild(backPct);
+        back.appendChild(facts);
+        back.appendChild(foot);
+
+        inner.appendChild(front);
+        inner.appendChild(back);
+        card.appendChild(inner);
         frag.appendChild(card);
       });
 
@@ -2164,12 +2306,16 @@
       hideUpdateBar();
       toast('已忽略 ' + state.updateVersion + '，以后不再提示');
     });
-    el.updateGo.addEventListener('click', function (event) {
-      // 桌面壳里 window.open 打不开系统浏览器，交给 Tauri 命令；网页版走正常的 <a> 跳转
+    // 界面里所有外部链接统一处理：桌面壳里 <a target="_blank"> 打不开系统浏览器，
+    // 得交给 Tauri 的 open_url；网页版走浏览器默认行为（新标签页）。
+    // 用一处委托而不是逐个绑，免得以后新加链接又漏掉。
+    document.addEventListener('click', function (event) {
+      var link = event.target && event.target.closest ? event.target.closest('a[href^="http"]') : null;
+      if (!link) return;
       if (!(TauriBridge.isTauri && TauriBridge.isTauri())) return;
       event.preventDefault();
-      TauriBridge.openExternal(el.updateGo.href).then(function (ok) {
-        if (!ok) toast('打不开浏览器，请手动访问：' + el.updateGo.href);
+      TauriBridge.openExternal(link.href).then(function (ok) {
+        if (!ok) toast('打不开浏览器，请手动访问：' + link.href);
       });
     });
 

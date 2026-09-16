@@ -60,24 +60,44 @@
     <button id="btn-empty-add" class="btn btn-primary btn-lg" type="button">＋ 添加图书</button>
   </div>
 
-  <div class="feature-strip">
-    <div class="feature">
+  <nav class="feature-strip" aria-label="关于 MingScribe">
+    <a class="feature" href="https://github.com/0xm1ng/MingScribe#privacy" target="_blank" rel="noopener">
       <span class="f-icon" aria-hidden="true">🔒</span>
-      <div class="f-text"><strong>本地隐私</strong><em>文件只在你设备上读取，绝不上传任何服务器</em></div>
-    </div>
-    <div class="feature">
+      <span class="f-body">
+        <strong>本地隐私</strong>
+        <em>文件只在你设备上读取，绝不上传任何服务器</em>
+        <span class="f-tags">无账号 · 无上传 · 数据不出本机</span>
+      </span>
+      <span class="f-arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="feature" href="https://github.com/0xm1ng/MingScribe#formats" target="_blank" rel="noopener">
       <span class="f-icon" aria-hidden="true">📚</span>
-      <div class="f-text"><strong>十余种格式</strong><em>TXT / EPUB / MOBI / DOCX 等统一阅读</em></div>
-    </div>
-    <div class="feature">
+      <span class="f-body">
+        <strong>十余种格式</strong>
+        <em>转成统一中间格式后阅读，进度与划线共用一套</em>
+        <span class="f-tags">TXT · EPUB · MOBI · AZW3 · DOCX · FB2 · RTF · HTML · CBZ</span>
+      </span>
+      <span class="f-arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="feature" href="https://github.com/0xm1ng/MingScribe#annotations" target="_blank" rel="noopener">
       <span class="f-icon" aria-hidden="true">🖍️</span>
-      <div class="f-text"><strong>划线与批注</strong><em>四种颜色高亮，一键导出 Markdown</em></div>
-    </div>
-    <div class="feature">
+      <span class="f-body">
+        <strong>划线与批注</strong>
+        <em>选中即弹工具条，四种颜色高亮，可写批注</em>
+        <span class="f-tags">黄 / 绿 / 蓝 / 粉 · 一键导出 Markdown</span>
+      </span>
+      <span class="f-arrow" aria-hidden="true">→</span>
+    </a>
+    <a class="feature" href="https://github.com/0xm1ng/MingScribe/releases" target="_blank" rel="noopener">
       <span class="f-icon" aria-hidden="true">⤓</span>
-      <div class="f-text"><strong>自动更新</strong><em>有新版本时在书架提醒你，一键去下载</em></div>
-    </div>
-  </div>
+      <span class="f-body">
+        <strong>自动更新</strong>
+        <em>启动时匿名查询版本，有新版本才在顶部提醒</em>
+        <span class="f-tags">只提醒不静默安装 · 可忽略某版本</span>
+      </span>
+      <span class="f-arrow" aria-hidden="true">→</span>
+    </a>
+  </nav>
 
   <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip,.mobi,.azw,.azw3,.kfx,.doc,.docx,.rtf,.odt,.html,.htm,.fb2,.lit,.pdb,.prc,.snb,.cbr,.cbz" hidden />
 </section>

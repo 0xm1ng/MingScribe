@@ -1,7 +1,7 @@
 /**
  * 书架新界面截图自检（开发用，不进 npm test）。
- * 用真实 Edge 打开页面，导入两本示例书，分别截取：空态 / 卡片网格 / 菜单 / 关于 / 帮助 / 深色，
- * 并报告页面报错数量。产物落到 tools/_shots/。
+ * 用真实 Edge 打开页面，导入两本示例书，分别截取：空态 / 卡片网格 / 卡片翻转态 /
+ * 菜单 / 关于 / 帮助 / 深色 / 阅读器顶栏与 Aa 面板，并报告页面报错数量。产物落到 tools/_shots/。
  */
 const http = require('http');
 const fs = require('fs');
@@ -59,8 +59,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.setInputFiles('#file-input', f2);
   await sleep(900);
   await page.click('#btn-back');
-  await sleep(600);
+  // 导入完成的 toast 会压在卡片上，等它自己收起来再拍
+  await page.waitForSelector('#toast[hidden]', { timeout: 8000 }).catch(function () {});
+  // 截图前把指针挪开：卡片是 hover 翻面的，指针停在上面会拍出背面
+  await page.mouse.move(4, 4);
+  await sleep(700);
   await page.screenshot({ path: path.join(dir, '2-grid.png') });
+
+  // 卡片翻转态（背面 = 详情 + 操作）
+  await page.locator('#shelf-grid .book-card').first().hover();
+  await sleep(850);
+  await page.screenshot({ path: path.join(dir, '8-flip.png') });
+  await page.mouse.move(4, 4);
+  await sleep(700);
 
   // 菜单
   await page.click('#btn-menu');

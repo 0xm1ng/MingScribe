@@ -291,8 +291,11 @@ async function makeHighlight(page, opts) {
   }
 
   await settle(page, 800);
+  // 卡片是 hover 翻面的，指针停在卡片上会拍出一张背面
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(700);
   // 书架内容只占屏幕上部，裁掉下方空白，README 里更紧凑
-  await shot(page, '01-shelf', { x: 0, y: 0, width: 1440, height: 700 });
+  await shot(page, '01-shelf', { x: 0, y: 0, width: 1440, height: 790 });
   step('11. 书架卡片数：' + await page.locator('#shelf-grid .book-card').count());
 
   /* ---------- 收尾 ---------- */

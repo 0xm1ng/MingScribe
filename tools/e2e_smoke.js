@@ -40,6 +40,52 @@ async function ensureTypoPanel(page) {
   }
 }
 
+/**
+ * 从书架打开第一本书。
+ *
+ * 书架卡片是**可翻转**的：正面只展示封面，操作按钮在背面，靠 hover 转过去。
+ * 未翻转时背面按钮被正面整块盖住，于是 Playwright 的 click 每次做
+ * 「这个坐标上的最上层元素是不是目标」检查都会判定被 `.book-front` 拦截，
+ * 重试 30 秒后超时。真实鼠标用户悬停过去是能正常点的，这是翻转式卡片
+ * 天然不兼容 Playwright actionability 的地方，不是产品缺陷。
+ * 所以这里直接派发一次 DOM 点击：语义与点按钮一致，只是不经过指针命中测试。
+ */
+/**
+ * 等到正文滚动位置稳定再继续。
+ *
+ * 为什么要等：打开一本书时，应用会把正文滚回上次读到的位置，这次**程序化滚动**
+ * 会派发 scroll 事件，而 scroll 监听里有 `hideToolbar()`（有选区时收起划线工具条，
+ * 因为工具条是按视口坐标定位的，一滚就错位了）。
+ * 于是如果刚打开书就立刻建选区，工具条会「弹出来又被自己收回去」。
+ * 真人操作（按下→拖动→松手）不可能在几十毫秒内完成，碰不到这个竞态，
+ * 但脚本可以 —— 所以测试侧先等滚动停稳，不去改产品的滚动逻辑。
+ */
+async function waitScrollSettled(page) {
+  await page.waitForFunction(
+    () => new Promise((resolve) => {
+      const el = document.getElementById('reader-content');
+      let last = el.scrollTop;
+      let stable = 0;
+      const tick = () => {
+        if (el.scrollTop === last) stable++;
+        else { stable = 0; last = el.scrollTop; }
+        if (stable >= 4) resolve(true);
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }),
+    null,
+    { timeout: 10000 }
+  );
+}
+
+async function clickShelfOpen(page) {
+  await page.evaluate(() => {
+    const btn = document.querySelector('#shelf-grid .book-card button[data-action="open"]');
+    if (btn) btn.click();
+  });
+}
+
 (async function main() {
   const browser = await chromium.launch({
     executablePath: EDGE,
@@ -172,6 +218,7 @@ async function ensureTypoPanel(page) {
     { timeout: 60000 }
   );
   log('8. 打开小书 Web 安全学习笔记（' + sizeOf(SMALL) + '）：' + (Date.now() - t2) + ' ms');
+  await waitScrollSettled(page);
 
   /* ---- 划线：选中 → 工具条 → 上色 ---- */
   log('');
@@ -199,8 +246,24 @@ async function ensureTypoPanel(page) {
     log('10. 划线流程：跳过（首个段落没有可选的文本节点）');
   } else {
     log('10. 划线流程');
-    log('    选中文字：「' + picked.picked + '」→ 工具条可见=' +
-      (await page.locator('#hl-toolbar').isVisible()));
+    const hlState = await page.evaluate(() => {
+      const t = document.getElementById('hl-toolbar');
+      const sel = window.getSelection();
+      const anchor = sel && sel.anchorNode;
+      const content = document.getElementById('reader-content');
+      return {
+        hidden: t.hidden,
+        display: getComputedStyle(t).display,
+        visible: !!(t.offsetWidth || t.offsetHeight),
+        rangeCount: sel ? sel.rangeCount : -1,
+        selText: sel ? String(sel).slice(0, 20) : '',
+        inContent: !!(anchor && content.contains(anchor)),
+        readerHidden: document.getElementById('reader-screen').hidden,
+        anchorTag: anchor ? (anchor.nodeType === 3 ? anchor.parentNode.nodeName : anchor.nodeName) : ''
+      };
+    });
+    log('    选中文字：「' + picked.picked + '」');
+    log('    工具条状态: ' + JSON.stringify(hlState));
 
     await page.click('.hl-swatch.hl-yellow');
     await page.waitForTimeout(250);
@@ -305,7 +368,7 @@ async function ensureTypoPanel(page) {
   log('');
   await page.reload();
   await page.waitForSelector('#shelf-screen:not([hidden])');
-  await page.click('#shelf-grid .book-card button[data-action="open"]');
+  await clickShelfOpen(page);
   await page.waitForFunction(
     () => document.querySelectorAll('#reader-content [data-off]').length > 0,
     null,
@@ -332,6 +395,21 @@ async function ensureTypoPanel(page) {
   log('12. 书架条目（验证缓存与进度写入）：');
   if (!shelf.length) log('   （空）');
   shelf.forEach(function (i) { log('   · ' + i.name + '  →  ' + i.meta); });
+
+  /* ---- 卡片翻转（这层交互只有真浏览器能验） ---- */
+  await page.hover('#shelf-grid .book-card');
+  await page.waitForTimeout(900);
+  const flipM11 = await page.evaluate(() => {
+    const inner = document.querySelector('#shelf-grid .book-card .book-inner');
+    if (!inner) return null;
+    const m = getComputedStyle(inner).transform;
+    if (!m || m === 'none') return 1;
+    return Math.round(new DOMMatrixReadOnly(m).m11);
+  });
+  log('12b. 卡片悬停翻转：.book-inner 的 m11=' + flipM11 + '（-1 = 背面已转到前面）');
+  if (flipM11 !== -1) throw new Error('卡片翻转失效：m11=' + flipM11);
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(800);
 
   /* ---- EPUB 支持 ---- */
   log('');
@@ -439,7 +517,7 @@ async function ensureTypoPanel(page) {
   log('');
   await page.reload();
   await page.waitForSelector('#shelf-screen:not([hidden])');
-  await page.click('#shelf-grid .book-card button[data-action="open"]');
+  await clickShelfOpen(page);
   await page.waitForFunction(
     () => document.querySelectorAll('#reader-content [data-off]').length > 0,
     null,
