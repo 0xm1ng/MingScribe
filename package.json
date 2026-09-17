@@ -8,6 +8,8 @@
     "ebooks": "python tools/build_ebooks.py",
     "ebooks:check": "python tools/sample_check.py",
     "convert:check": "node tools/convert_check.js",
+    "sync:check": "node tools/check_release_sync.js",
+    "tag:check": "node tools/check_tag_version.js",
     "build:frontend": "node tools/build_frontend.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

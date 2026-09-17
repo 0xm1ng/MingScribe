@@ -239,6 +239,29 @@ node --test tests/*.test.js
 
 > 跳过的 1 项是 `CTF-All-In-One` 电子书校验——该文件被 Windows Defender 阻断，需用户手动恢复后才会重新纳入校验。详见「测试电子书素材」一节。
 
+## 发布与版本号（同步守卫）
+
+版本号写在四个地方，必须同时改、并且必须等于 Git 标签：
+
+| 位置 | 字段 |
+|---|---|
+| `package.json` | `version` |
+| `src-tauri/Cargo.toml` | `version` |
+| `src-tauri/tauri.conf.json` | `version` |
+| `src/app.js` | `APP_VERSION` |
+
+编号规则（语义化版本）：**加了新功能就升中间位**，第三位归零 —— `0.1.1 → 0.2.0`；只有纯修 bug 才升末位 `0.1.1 → 0.1.2`。改版本号等于一次真实发布，**不允许同名不同内容地重打包**。
+
+三道守卫，任何一道红了都不要发：
+
+```
+npm test                    # 四处版本号是否同步（tests/updater.test.js 守着）
+npm run tag:check --all     # 每个 vX.Y.Z 标签是否与其提交里的版本号一致
+npm run sync:check          # 本地 ↔ GitHub 是否一致（提交 / 标签 / Release / 安装包）
+```
+
+`npm run tag:check` 同时跑在 CI 里（推 `v*` 标签时自动触发），所以「标签与代码对不上」会在推上去的那一刻就暴露。`npm run sync:check` 只读访问 GitHub API：退出码 `0` 完全同步、`1` 存在偏差、`2` 网络不可用（不是代码问题）。
+
 ## 浏览器端到端自检（可选）
 
 单元测试覆盖不到「文件选择、DOM 渲染、鼠标拖动、键盘交互」这些环节。`tools/e2e_smoke.js` 用真实 Chromium 内核（本机 Edge，无需额外下载浏览器）跑一遍完整流程并输出报告。

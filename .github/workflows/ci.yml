@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -57,3 +58,21 @@ jobs:
             echo "::error::exited $code · $(node --version) · ${{ matrix.os }} · TZ=${{ matrix.tz }}%0A$msg"
           fi
           exit $code
+
+  # 标签守卫：vX.Y.Z 标签必须与四处版本号完全一致。
+  # 只在推标签时跑 —— 目的是让「标签与代码对不上」这类事故在推上去的一刻就暴露，
+  # 而不是等到用户装完发现 About 里的版本号和 Release 名不一样。
+  tag-version:
+    name: tag matches version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check tag === version fields
+        shell: bash
+        run: node tools/check_tag_version.js
