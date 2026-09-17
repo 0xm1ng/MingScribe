@@ -295,7 +295,8 @@ async function makeHighlight(page, opts) {
   await page.mouse.move(2, 2);
   await page.waitForTimeout(700);
   // 书架内容只占屏幕上部，裁掉下方空白，README 里更紧凑
-  await shot(page, '01-shelf', { x: 0, y: 0, width: 1440, height: 790 });
+  // 高度要够到特性卡第三行（格式清单），否则配图底部会被裁掉一截
+  await shot(page, '01-shelf', { x: 0, y: 0, width: 1440, height: 840 });
   step('11. 书架卡片数：' + await page.locator('#shelf-grid .book-card').count());
 
   /* ---------- 收尾 ---------- */

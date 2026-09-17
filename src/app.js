@@ -24,12 +24,13 @@
   var ReadingPrefs = window.MingScribe.ReadingPrefs;
   var TauriBridge = window.MingScribe.TauriBridge;
   var Cover = window.MingScribe.Cover;
+  var Pdf = window.MingScribe.Pdf;
 
   /**
    * 当前版本号。**必须与 package.json / src-tauri/tauri.conf.json 三处一致**——
    * tests/updater.test.js 里有一条测试专门守这件事，改了不同步会直接测试失败。
    */
-  var APP_VERSION = '0.2.0';
+  var APP_VERSION = '0.3.0';
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
@@ -430,9 +431,12 @@
 
   /* ---------------- 书架 ---------------- */
 
-  /** 从文件名里取扩展名，用于封面角标和背面「格式」一行。 */
+  /**
+   * 从文件名里取扩展名，用于封面角标和背面「格式」一行。
+   * 统一返回大写（封面角标、提示文案都按大写排版）。全项目只有这一处定义。
+   */
   function fileExt(name) {
-    var m = String(name || '').match(/\.([a-z0-9]{1,5})$/i);
+    var m = String(name || '').match(/\.([a-z0-9]{1,8})$/i);
     return m ? m[1].toUpperCase() : '';
   }
 
@@ -756,6 +760,8 @@
                 function (buffer) { ingestEpub(buffer, meta, entry.handle); },
                 function () { askForFile(key, meta.name); }
               );
+            } else if (Pdf.isPdfName(file.name)) {
+              openPdfFile(file, meta, entry.handle);
             } else {
               readFileToText(file).then(
                 function (text) { ingest(text, meta, entry.handle); },
@@ -784,6 +790,13 @@
         return;
       }
 
+      // PDF 只缓存了元信息（正文太大不入库），必须回到原文件；
+      // 直接 ingest 会把空正文当成「空文件」，所以这里提前拦掉。
+      if (entry.meta.format === 'pdf') {
+        askForFile(key, meta.name);
+        return;
+      }
+
       ingest(entry.text, meta, null);
     }, function () {
       askForFile(key, fallbackName);
@@ -797,7 +810,14 @@
     if (BookStore.supportsFileSystemAccess()) {
       window.showOpenFilePicker({
         types: [
-          { description: '电子书（TXT / EPUB）', accept: { 'text/plain': ['.txt', '.text'], 'application/epub+zip': ['.epub'] } }
+          {
+            description: '电子书（TXT / EPUB / PDF）',
+            accept: {
+              'text/plain': ['.txt', '.text'],
+              'application/epub+zip': ['.epub'],
+              'application/pdf': ['.pdf']
+            }
+          }
         ],
         multiple: false
       }).then(function (handles) {
@@ -837,6 +857,12 @@
       }, function () {
         toast('读取文件失败');
       });
+      return;
+    }
+
+    // PDF 是固定版式，走独立的 PDF 阅读视图（按页栅格化），不进可重排的正文解析
+    if (Pdf.isPdfName(file.name)) {
+      openPdfFile(file, meta, handle || null);
       return;
     }
 
@@ -923,11 +949,6 @@
     return win.MingScribeConvert || null;
   }
 
-  function fileExt(name) {
-    var m = /\.([a-z0-9]+)$/i.exec(name || '');
-    return m ? m[1].toLowerCase() : '';
-  }
-
   /**
    * 非原生格式：经桌面版转换后端转成 EPUB，再走标准 EPUB 入口（ingestEpub）。
    * 这样 progress / search / decorate / annotations 全部复用，零返工。
@@ -997,6 +1018,236 @@
     state.book = null;
     state.meta = null;
     renderShelf();
+  }
+
+  /* ---------------- PDF 阅读 ---------------- */
+
+  /**
+   * PDF 是固定版式，和可重排正文完全是两回事，所以单独一套状态与视图：
+   *  - 锚点用「页码」——PDF 页面尺寸固定，页码不会像可重排文本那样随字号漂移；
+   *  - 进度仍写进 Progress（一页 = 一章，见 Pdf.syntheticBook），
+   *    于是书架的百分比、最近阅读排序、清空记录这些能力全部自动可用，零重复实现。
+   */
+  var pdfState = {
+    doc: null,
+    book: null,
+    meta: null,
+    page: 1,
+    total: 0,
+    scale: 1,
+    // 默认「整页」：A4 竖版在宽屏上按页宽铺满会高出一大截、每页都要上下滚，
+    // 先看到完整版面更符合 PDF 阅读器的习惯（Edge / Acrobat 默认也是整页）。
+    fit: 'page',    // 'width' | 'page' | 'manual'
+    token: 0,
+    resumed: false, // 这次打开是不是从上次位置续读的
+    announced: false // 首次渲染完成后只提示一次，翻页不要每次都弹
+  };
+
+  function pdfScreenOpen() {
+    return !!(el.pdfScreen && !el.pdfScreen.hidden);
+  }
+
+  /**
+   * 能不能加载 ES Module。pdf.js v4+ 只发 ESM，而浏览器在 file:// 下
+   * 一律禁止加载模块（CORS），所以网页版直接放弃 PDF —— 给明确提示，
+   * 而不是摆一个点了没反应的按钮。桌面版（http://tauri.localhost）正常。
+   */
+  function isModuleCapable() {
+    try {
+      return String(window.location.protocol).indexOf('http') === 0;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /** 打开一个 PDF：读字节 → pdf.js 解析 → 进独立视图。 */
+  function openPdfFile(file, meta, handle) {
+    if (!file) return;
+
+    if (!isModuleCapable()) {
+      toast('网页版暂时看不了 PDF：浏览器不允许以 file:// 方式加载内置渲染引擎。' +
+        '请用桌面版，或先把 PDF 转成 TXT / EPUB 再导入。');
+      return;
+    }
+
+    toast('正在打开 PDF《' + meta.title + '》…', true);
+
+    Pdf.readFileBytes(file)
+      .then(function (bytes) { return Pdf.engine().open(bytes); })
+      .then(function (doc) {
+        pdfState.doc = doc;
+        pdfState.meta = meta;
+        pdfState.total = doc.numPages || 0;
+        pdfState.book = Pdf.syntheticBook(pdfState.total, meta.title);
+        pdfState.fit = 'page';
+
+        if (!pdfState.total) {
+          toast('这个 PDF 里没有可显示的页面');
+          return;
+        }
+
+        // 只存元信息：PDF 正文动辄几十 MB，不进缓存；下次打开要重新选文件
+        cacheBook({
+          key: meta.key,
+          title: meta.title,
+          name: meta.name,
+          size: meta.size,
+          chapters: pdfState.total,
+          chars: pdfState.total,
+          format: 'pdf',
+          text: '',
+          handle: handle || null
+        });
+
+        enterPdf(meta);
+
+        var saved = store.get(meta.key);
+        pdfState.resumed = !!saved;
+        pdfState.announced = false;
+        gotoPdfPage(saved ? (Number(saved.chapterIndex) || 0) + 1 : 1, true);
+      }, function (err) {
+        toast('PDF 打开失败：' + (err && err.message ? err.message : '文件可能已损坏或带密码'));
+      });
+  }
+
+  function enterPdf(meta) {
+    el.shelfScreen.hidden = true;
+    el.readerScreen.hidden = true;
+    el.pdfScreen.hidden = false;
+    el.pdfBookName.textContent = bookTitleOf(meta);
+    el.pdfRange.max = String(Math.max(1, pdfState.total));
+    el.pdfPageInput.max = String(Math.max(1, pdfState.total));
+    el.pdfFit.textContent = pdfState.fit === 'width' ? '适应宽度' : (pdfState.fit === 'page' ? '整页' : '自定义');
+  }
+
+  function closePdf() {
+    savePdfProgress();
+    if (pdfState.doc && typeof pdfState.doc.destroy === 'function') {
+      try { pdfState.doc.destroy(); } catch (err) { /* 销毁失败不影响使用 */ }
+    }
+    pdfState.doc = null;
+    pdfState.book = null;
+    pdfState.meta = null;
+    pdfState.token++;
+    pdfState.announced = false;
+    pdfState.resumed = false;
+    el.pdfScreen.hidden = true;
+    el.pdfHint.hidden = false;
+    el.pdfHint.textContent = '正在渲染…';
+    el.shelfScreen.hidden = false;
+    renderShelf();
+  }
+
+  /** 翻到第 page 页（1 起）。force 用于首次进入——页码没变也要渲染一次。 */
+  function gotoPdfPage(page, force) {
+    var n = Pdf.clampPage(page, pdfState.total);
+    var changed = n !== pdfState.page;
+    pdfState.page = n;
+
+    el.pdfPageLabel.textContent = Pdf.pageLabel(n, pdfState.total);
+    el.pdfPageInput.value = String(n);
+    el.pdfRange.value = String(n);
+    el.pdfPct.textContent = (pdfState.total ? Math.round((n / pdfState.total) * 100) : 0) + '%';
+    el.pdfPrevBtn.disabled = n <= 1;
+    el.pdfNextBtn.disabled = n >= pdfState.total;
+
+    if (force || changed) renderPdfPage();
+    savePdfProgress();
+  }
+
+  /** 把当前页画到 canvas 上。token 用来丢弃「翻页太快」时过期的渲染结果。 */
+  function renderPdfPage() {
+    if (!pdfState.doc) return;
+    var token = ++pdfState.token;
+    var page = pdfState.page;
+    var engine = Pdf.engine();
+
+    el.pdfHint.hidden = false;
+    el.pdfHint.textContent = '正在渲染第 ' + page + ' 页…';
+
+    engine.pageSize(pdfState.doc, page).then(function (size) {
+      if (token !== pdfState.token) return;
+
+      // 留 48px 内边距，页面不会贴着窗口边缘
+      var available = {
+        width: Math.max(200, (el.pdfView.clientWidth || 900) - 48),
+        height: Math.max(200, (el.pdfView.clientHeight || 600) - 48)
+      };
+      var scale = pdfState.fit === 'manual'
+        ? Pdf.clampScale(pdfState.scale)
+        : Pdf.fitScale(available, size, pdfState.fit);
+
+      pdfState.scale = scale;
+      el.pdfZoomVal.textContent = Pdf.scaleLabel(scale);
+      el.pdfStatus.textContent = '第 ' + page + ' 页 · 共 ' + pdfState.total + ' 页';
+
+      return engine.render(pdfState.doc, page, el.pdfCanvas, scale).then(function () {
+        if (token !== pdfState.token) return;
+        el.pdfHint.hidden = true;
+        // 打开时的「正在打开…」是常驻提示，必须由首屏渲染结果把它顶掉
+        if (!pdfState.announced) {
+          pdfState.announced = true;
+          toast(pdfState.resumed
+            ? '已恢复到上次读到第 ' + pdfState.page + ' 页'
+            : '已打开：共 ' + pdfState.total + ' 页');
+        }
+      });
+    }, function (err) {
+      if (token !== pdfState.token) return;
+      el.pdfHint.hidden = false;
+      el.pdfHint.textContent = '第 ' + page + ' 页渲染失败：' +
+        (err && err.message ? err.message : '未知错误');
+    });
+  }
+
+  function savePdfProgress() {
+    if (!pdfState.book || !pdfState.meta) return;
+    store.save(Progress.makeRecord(
+      pdfState.book, pdfState.meta, pdfState.page - 1, Pdf.pageOffset(), Date.now()
+    ));
+  }
+
+  /** dir = +1 放大，-1 缩小。手动调过缩放后，适应模式转为「自定义」。 */
+  function stepPdfZoom(dir) {
+    pdfState.fit = 'manual';
+    pdfState.scale = Pdf.stepScale(pdfState.scale, dir);
+    el.pdfFit.textContent = '自定义';
+    el.pdfZoomVal.textContent = Pdf.scaleLabel(pdfState.scale);
+    renderPdfPage();
+  }
+
+  function togglePdfFit() {
+    if (pdfState.fit === 'width') {
+      pdfState.fit = 'page';
+      el.pdfFit.textContent = '整页';
+    } else {
+      pdfState.fit = 'width';
+      el.pdfFit.textContent = '适应宽度';
+    }
+    renderPdfPage();
+  }
+
+  /** PDF 视图下的快捷键。返回 true 表示已消费，调用方负责 preventDefault。 */
+  function onPdfKeyDown(event) {
+    if (!pdfScreenOpen()) return false;
+
+    var tag = event.target && event.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
+
+    if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+      gotoPdfPage(pdfState.page - 1);
+      return true;
+    }
+    if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+      gotoPdfPage(pdfState.page + 1);
+      return true;
+    }
+    if (event.key === 'Home') { gotoPdfPage(1); return true; }
+    if (event.key === 'End') { gotoPdfPage(pdfState.total); return true; }
+    if (event.key === '+' || event.key === '=') { stepPdfZoom(1); return true; }
+    if (event.key === '-' || event.key === '_') { stepPdfZoom(-1); return true; }
+    if (event.key === 'Escape') { closePdf(); return true; }
+    return false;
   }
 
   /* ---------------- 阅读器 ---------------- */
@@ -2193,6 +2444,12 @@
   /* ---------------- 事件绑定 ---------------- */
 
   function onKeyDown(event) {
+    // PDF 视图自己一套快捷键，优先处理，别被正文阅读器的逻辑截走
+    if (onPdfKeyDown(event)) {
+      event.preventDefault();
+      return;
+    }
+
     if (el.readerScreen.hidden || !state.book) return;
 
     // 焦点在输入框 / 文本域里时，一律不接管按键。
@@ -2594,6 +2851,21 @@
       }
     });
 
+    /* PDF 视图 */
+    el.pdfBack.addEventListener('click', closePdf);
+    el.pdfPrevBtn.addEventListener('click', function () { gotoPdfPage(pdfState.page - 1); });
+    el.pdfNextBtn.addEventListener('click', function () { gotoPdfPage(pdfState.page + 1); });
+    el.pdfPageInput.addEventListener('change', function () {
+      gotoPdfPage(parseInt(el.pdfPageInput.value, 10) || 1);
+    });
+    el.pdfRange.addEventListener('input', function () {
+      gotoPdfPage(parseInt(el.pdfRange.value, 10) || 1);
+    });
+    el.pdfZoomIn.addEventListener('click', function () { stepPdfZoom(1); });
+    el.pdfZoomOut.addEventListener('click', function () { stepPdfZoom(-1); });
+    el.pdfFit.addEventListener('click', togglePdfFit);
+    el.pdfTheme.addEventListener('click', function () { el.themeBtn.click(); });
+
     document.addEventListener('keydown', onKeyDown);
 
     // 窗口大小变了，一屏能放的字也变了 —— 分页模式下必须重新切页，
@@ -2601,13 +2873,19 @@
     window.addEventListener('resize', function () {
       if (state.resizeTimer) clearTimeout(state.resizeTimer);
       state.resizeTimer = setTimeout(function () {
-        if (!state.book || !isPaged()) return;
-        // 跟随屏幕宽度：用户没手动锁定时，宽度跨过阈值会自动切单/双页
-        applySpreadChrome();
-        repaginate(currentOffset());
+        if (state.book && isPaged()) {
+          // 跟随屏幕宽度：用户没手动锁定时，宽度跨过阈值会自动切单/双页
+          applySpreadChrome();
+          repaginate(currentOffset());
+        }
+        // PDF：适应模式下缩放比随窗口变，要按新尺寸重画当前页
+        if (pdfScreenOpen() && pdfState.fit !== 'manual') renderPdfPage();
       }, 160);
     });
-    window.addEventListener('beforeunload', flushSave);
+    window.addEventListener('beforeunload', function () {
+      flushSave();
+      savePdfProgress();
+    });
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') flushSave();
     });
@@ -2702,6 +2980,25 @@
     el.noteColorBtn = $('note-color');
     el.noteDeleteBtn = $('note-delete');
     el.noteCloseBtn = $('note-close');
+
+    el.pdfScreen = $('pdf-screen');
+    el.pdfBookName = $('pdf-book-name');
+    el.pdfPageLabel = $('pdf-page-label');
+    el.pdfPageInput = $('pdf-page-input');
+    el.pdfPrevBtn = $('pdf-prev');
+    el.pdfNextBtn = $('pdf-next');
+    el.pdfZoomOut = $('pdf-zoom-out');
+    el.pdfZoomIn = $('pdf-zoom-in');
+    el.pdfZoomVal = $('pdf-zoom-val');
+    el.pdfFit = $('pdf-fit');
+    el.pdfTheme = $('pdf-theme');
+    el.pdfBack = $('pdf-back');
+    el.pdfView = $('pdf-view');
+    el.pdfCanvas = $('pdf-canvas');
+    el.pdfHint = $('pdf-hint');
+    el.pdfRange = $('pdf-range');
+    el.pdfPct = $('pdf-pct');
+    el.pdfStatus = $('pdf-status');
 
     el.toast = $('toast');
   }

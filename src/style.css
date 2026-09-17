@@ -770,9 +770,15 @@ body {
   transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
-.icon-btn:hover {
+.icon-btn:hover:not(:disabled) {
   background: var(--accent-soft);
   border-color: var(--border);
+}
+
+/* 到头了就把按钮压暗，别让人一直点一个没反应的东西（PDF 首/末页翻页） */
+.icon-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
 }
 
 /*
@@ -1572,6 +1578,102 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
 
 .toast[hidden] { display: none; }
 
+/* ---------- PDF 阅读视图 ---------- */
+
+/*
+ * PDF 是固定版式，整页栅格化成 canvas，与可重排的正文阅读器完全独立：
+ * 不共用 .reader-content，也不参与分页 / 划线 / 目录 —— 那些都以「字符偏移」为锚点，
+ * 套在 PDF 上必然错位。这里只借用统一中间格式来存进度（一页 = 一章）。
+ */
+.pdf {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--reader-bg);
+}
+
+.pdf-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: none;
+}
+
+.pdf-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: auto;
+  padding: 24px;
+  /* 页面之外压暗一档，把「纸」从背景里托出来 */
+  background: color-mix(in srgb, var(--reader-bg) 88%, #000 12%);
+}
+
+.pdf-page-wrap {
+  position: relative;
+  margin: auto;
+  /* 首帧还没算出页面尺寸时给个下限，提示文字才有地方居中 */
+  min-width: 240px;
+  min-height: 300px;
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .22);
+}
+
+body[data-theme="dark"] .pdf-page-wrap { background: #f4f2ee; }
+
+#pdf-canvas { display: block; border-radius: 3px; }
+
+.pdf-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pdf-hint[hidden] { display: none; }
+
+.pdf-page-input {
+  width: 68px;
+  height: 32px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.pdf-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.pdf-range {
+  flex: 1;
+  min-width: 80px;
+  accent-color: var(--accent);
+}
+
 /* 窄窗口：分组背景退场、分隔线收起，把空间让给按钮（按钮本身换行，不隐藏功能） */
 @media (max-width: 900px) {
   .bar-group { background: none; padding: 0; }
@@ -1585,6 +1687,8 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
   /* 窄屏下翻页热区太占地方，靠键盘/滑动即可 */
   .page-edge { display: none; }
   .brand-sub { display: none; }
+  .pdf-bar { padding: 8px 10px; }
+  .pdf-view { padding: 12px; }
   .shelf { --shelf-pad: 16px; padding-bottom: 48px; }
   .shelf-toolbar { flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 }

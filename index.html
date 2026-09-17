@@ -75,7 +75,7 @@
       <span class="f-body">
         <strong>十余种格式</strong>
         <em>转成统一中间格式后阅读，进度与划线共用一套</em>
-        <span class="f-tags">TXT · EPUB · MOBI · AZW3 · DOCX · FB2 · RTF · HTML · CBZ</span>
+        <span class="f-tags">TXT · EPUB · PDF · MOBI · AZW3 · DOCX · FB2 · RTF · HTML · CBZ</span>
       </span>
       <span class="f-arrow" aria-hidden="true">→</span>
     </a>
@@ -99,7 +99,7 @@
     </a>
   </nav>
 
-  <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip,.mobi,.azw,.azw3,.kfx,.doc,.docx,.rtf,.odt,.html,.htm,.fb2,.lit,.pdb,.prc,.snb,.cbr,.cbz" hidden />
+  <input id="file-input" type="file" accept=".txt,.text,.epub,text/plain,application/epub+zip,.mobi,.azw,.azw3,.kfx,.doc,.docx,.rtf,.odt,.html,.htm,.fb2,.lit,.pdb,.prc,.snb,.cbr,.cbz,.pdf,application/pdf" hidden />
 </section>
 
 <div id="about-modal" class="modal" hidden>
@@ -275,6 +275,49 @@
   </footer>
 </section>
 
+<!-- PDF 阅读视图：固定版式按页栅格化渲染，与可重排的正文阅读器完全独立 -->
+<section id="pdf-screen" class="screen pdf" hidden>
+  <header class="pdf-bar">
+    <button id="pdf-back" class="icon-btn" type="button" title="返回书架">←</button>
+    <div class="reader-title">
+      <span id="pdf-book-name">未命名</span>
+      <span id="pdf-page-label" class="muted">1 / 1</span>
+    </div>
+
+    <div class="bar-group">
+      <button id="pdf-prev" class="icon-btn" type="button" title="上一页（← / PageUp）">‹</button>
+      <input id="pdf-page-input" class="pdf-page-input" type="number" min="1" step="1" value="1"
+             aria-label="跳到指定页" />
+      <button id="pdf-next" class="icon-btn" type="button" title="下一页（→ / PageDown）">›</button>
+    </div>
+
+    <span class="bar-divider"></span>
+
+    <div class="bar-group">
+      <button id="pdf-zoom-out" class="icon-btn" type="button" title="缩小">A−</button>
+      <span id="pdf-zoom-val" class="typo-val">100%</span>
+      <button id="pdf-zoom-in" class="icon-btn" type="button" title="放大">A+</button>
+      <button id="pdf-fit" class="icon-btn" type="button" title="在适应宽度 / 整页之间切换">适应宽度</button>
+    </div>
+
+    <button id="pdf-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
+  </header>
+
+  <div id="pdf-view" class="pdf-view">
+    <div id="pdf-page-wrap" class="pdf-page-wrap">
+      <canvas id="pdf-canvas"></canvas>
+      <p id="pdf-hint" class="pdf-hint">正在渲染…</p>
+    </div>
+  </div>
+
+  <footer class="pdf-foot">
+    <span id="pdf-pct" class="muted">0%</span>
+    <input id="pdf-range" class="pdf-range" type="range" min="1" max="1" step="1" value="1"
+           aria-label="翻页" />
+    <span id="pdf-status" class="foot-status">&nbsp;</span>
+  </footer>
+</section>
+
 <div id="toast" class="toast" hidden></div>
 
 <script src="src/encoding.js"></script>
@@ -292,6 +335,7 @@
 <script src="src/updater.js"></script>
 <script src="src/readingprefs.js"></script>
 <script src="src/cover.js"></script>
+<script src="src/pdf.js"></script>
 <script src="src/app.js"></script>
 </body>
 </html>
