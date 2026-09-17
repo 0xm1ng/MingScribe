@@ -262,6 +262,32 @@ npm run sync:check          # 本地 ↔ GitHub 是否一致（提交 / 标签 /
 
 `npm run tag:check` 同时跑在 CI 里（推 `v*` 标签时自动触发），所以「标签与代码对不上」会在推上去的那一刻就暴露。`npm run sync:check` 只读访问 GitHub API：退出码 `0` 完全同步、`1` 存在偏差、`2` 网络不可用（不是代码问题）。
 
+### 一次发布的标准流程
+
+```bash
+# 1. 改代码 + 补测试，跑绿
+npm test
+
+# 2. 四处版本号一起改（加功能升中间位、第三位归零；纯修 bug 才升末位）
+#    package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json / src/app.js(APP_VERSION)
+
+# 3. 打桌面安装包：产物在 src-tauri/target/release/bundle/，复制到 releases/
+#    （首次约 86 分钟；只改前端约 6 分钟；动了 Cargo.toml 约 9 分钟）
+
+# 4. 提交 → 打标签 → 推送
+git add -A && git commit -m "feat: …（vX.Y.Z）"
+git tag -a vX.Y.Z -m "vX.Y.Z：<一句话说明>"
+git push origin main
+git push origin vX.Y.Z
+
+# 5. 确认真的同步了（退出码必须是 0）
+npm run sync:check
+
+# 6. 在 GitHub 网页建 Release，附上 releases/ 里的 nsis 与 msi 两个安装包
+```
+
+> 第 5 步是唯一的判据：不要只看 `git push` 的返回码，也不要凭记忆认为「推过了」。
+
 ## 浏览器端到端自检（可选）
 
 单元测试覆盖不到「文件选择、DOM 渲染、鼠标拖动、键盘交互」这些环节。`tools/e2e_smoke.js` 用真实 Chromium 内核（本机 Edge，无需额外下载浏览器）跑一遍完整流程并输出报告。
