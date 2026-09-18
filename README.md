@@ -235,7 +235,7 @@ npm test
 node --test tests/*.test.js
 ```
 
-当前：**248 个测试（247 通过 / 0 失败 / 1 跳过）。**
+当前：**260 个测试（259 通过 / 0 失败 / 1 跳过）。**
 
 > 跳过的 1 项是 `CTF-All-In-One` 电子书校验——该文件被 Windows Defender 阻断，需用户手动恢复后才会重新纳入校验。详见「测试电子书素材」一节。
 
@@ -260,7 +260,25 @@ npm run tag:check --all     # 每个 vX.Y.Z 标签是否与其提交里的版本
 npm run sync:check          # 本地 ↔ GitHub 是否一致（提交 / 标签 / Release / 安装包）
 ```
 
-`npm run tag:check` 同时跑在 CI 里（推 `v*` 标签时自动触发），所以「标签与代码对不上」会在推上去的那一刻就暴露。`npm run sync:check` 只读访问 GitHub API：退出码 `0` 完全同步、`1` 存在偏差、`2` 网络不可用（不是代码问题）。
+`npm run tag:check` 同时跑在 CI 里（推 `v*` 标签时自动触发），所以「标签与代码对不上」会在推上去的那一刻就暴露。
+
+`npm run sync:check` 走**两条互相独立的通道**：提交与标签用 `git ls-remote`（不消耗 API 额度，且与 `git push` 是同一条网络路径），只有 Release 走 GitHub REST API（git 协议里没有这个概念）。退出码：
+
+| 退出码 | 含义 | 怎么办 |
+|---|---|---|
+| `0` | 完全同步 | 收工 |
+| `1` | 存在偏差 | 按报告末尾的「待办」逐条处理 |
+| `2` | 两条通道都读不到远端 | 先确认网络（不是代码问题） |
+| `3` | 提交与标签已核对无误，但 Release 未能核对 | 多为匿名 API 限流，见下 |
+
+> **关于 403：** 匿名 GitHub API 是 **60 次/小时，且按出口 IP 计**（同一网络下别的程序也会消耗这点额度）。额度用完时 API 返回 `403`，脚本会读出响应头里的 `x-ratelimit-reset`、连同出口 IP 一起告诉你还要等多久 —— 这**不是网络故障**，重跑没用。
+>
+> 想彻底摆脱限流就配一个只读 token（`public_repo` 权限足够），额度直接提到 5000/小时：
+>
+> ```bat
+> set GITHUB_TOKEN=ghp_xxx        REM 当前窗口有效
+> setx GITHUB_TOKEN ghp_xxx       REM 永久，需重开终端
+> ```
 
 ### 一次发布的标准流程
 
@@ -280,13 +298,22 @@ git tag -a vX.Y.Z -m "vX.Y.Z：<一句话说明>"
 git push origin main
 git push origin vX.Y.Z
 
-# 5. 确认真的同步了（退出码必须是 0）
+# 5. 确认提交与标签真的上去了
+#    此时唯一允许剩下的偏差是「远端还没有 vX.Y.Z 的 Release」
 npm run sync:check
 
 # 6. 在 GitHub 网页建 Release，附上 releases/ 里的 nsis 与 msi 两个安装包
+#    三个老坑：① 输完 tag 要点「Create new tag: vX.Y.Z on publish」
+#              ② 等附件传完再点发布
+#              ③ 别点说明框上方的「生成发行版说明」（会覆盖已写内容）
+
+# 7. 再跑一次，这次退出码必须是 0
+npm run sync:check
 ```
 
-> 第 5 步是唯一的判据：不要只看 `git push` 的返回码，也不要凭记忆认为「推过了」。
+> 第 5、7 步是唯一的判据：不要只看 `git push` 的返回码，也不要凭记忆认为「推过了」。
+> 若第 7 步返回 `3`，说明提交和标签都对上了、只是 Release 这一项没能核对（通常是匿名 API 限流），
+> 按上面的说明配 `GITHUB_TOKEN` 或等额度重置后重跑即可 —— 它不代表同步失败。
 
 ## 浏览器端到端自检（可选）
 
