@@ -303,6 +303,8 @@ git push origin vX.Y.Z
 npm run sync:check
 
 # 6. 在 GitHub 网页建 Release，附上 releases/ 里的 nsis 与 msi 两个安装包
+#    ★ 每个版本都要建，别跳版（0.2.0 曾被跳过，历史版本就断了档）
+#    ★ 积压多个版本时先发低的、后发高的 —— 后发布者会成为 Latest，顺序反了 Latest 会指错
 #    三个老坑：① 输完 tag 要点「Create new tag: vX.Y.Z on publish」
 #              ② 等附件传完再点发布
 #              ③ 别点说明框上方的「生成发行版说明」（会覆盖已写内容）
