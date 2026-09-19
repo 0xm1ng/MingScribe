@@ -806,11 +806,27 @@ body {
   max-width: 82vw;
   background: var(--surface);
   border-right: 1px solid var(--border);
+  border-radius: 0 14px 14px 0;
+  box-shadow: 14px 0 34px -18px rgba(15, 23, 42, .45);
   overflow-y: auto;
+  overflow-x: hidden;
   z-index: 20;
+  /* 初始态 = 收起（略左移 + 透明），.is-open 才是展开态；只动 transform/opacity */
+  transform: translateX(-18px);
+  opacity: 0;
+  transition: transform 180ms var(--ease), opacity 150ms ease-out;
+}
+
+.toc.is-open {
+  transform: translateX(0);
+  opacity: 1;
 }
 
 .toc[hidden] { display: none; }
+
+body[data-theme="dark"] .toc {
+  box-shadow: 14px 0 34px -14px rgba(0, 0, 0, .62);
+}
 
 .toc-head {
   display: flex;
@@ -823,6 +839,8 @@ body {
   position: sticky;
   top: 0;
   background: var(--surface);
+  /* 顶栏自己有底色，不加圆角会把面板右上角的圆角盖成方角 */
+  border-radius: 0 14px 0 0;
 }
 
 .toc-list {
@@ -841,9 +859,17 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-left: 2px solid transparent;
+  /* 只过渡颜色 + transform：走合成器，不触发重排 */
+  transition: background 140ms var(--ease), border-color 140ms var(--ease),
+              transform 140ms var(--ease);
 }
 
-.toc-list li:hover { background: var(--accent-soft); }
+.toc-list li:hover {
+  background: var(--accent-soft);
+  border-left-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: translateX(2px);
+}
 
 .toc-list li.active {
   color: var(--accent);
@@ -1228,6 +1254,12 @@ body:not([data-mode="paged"]) .page-edge { display: none; }
 
 /* ---------- 搜索面板 ---------- */
 
+/*
+ * 搜索面板是浮在主内容之上的一层，不是并排的一栏。
+ * 进出场只动 transform / opacity：这两个属性走合成器，不触发重排也不重绘，
+ * 动画结束浏览器会自己回收图层（所以没写 will-change，常驻反而白占显存）。
+ * 刻意不用 backdrop-filter: blur() —— 那要额外开一块离屏缓冲，代价远大于收益。
+ */
 .search-panel {
   position: absolute;
   top: 54px;
@@ -1237,13 +1269,47 @@ body:not([data-mode="paged"]) .page-edge { display: none; }
   max-width: 86vw;
   background: var(--surface);
   border-left: 1px solid var(--border);
+  border-radius: 14px 0 0 14px;
+  box-shadow: -14px 0 34px -18px rgba(15, 23, 42, .45);
   display: flex;
   flex-direction: column;
   z-index: 20;
+  /* 初始态 = 收起（略右移 + 透明）；.is-open 才是展开态 */
+  transform: translateX(18px);
+  opacity: 0;
+  transition: transform 180ms var(--ease), opacity 150ms ease-out;
 }
+
+.search-panel.is-open {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* 收起动画那 180ms 里面板还在 DOM 中（只是透明了），别让它截住点击 */
+.search-panel:not(.is-open) { pointer-events: none; }
 
 .search-panel[hidden],
 .search-results:empty { display: none; }
+
+body[data-theme="dark"] .search-panel {
+  box-shadow: -14px 0 34px -14px rgba(0, 0, 0, .62);
+}
+
+/* 关掉动效的人：直接显隐，不做位移与淡入 */
+@media (prefers-reduced-motion: reduce) {
+  .search-panel,
+  .notes-panel,
+  .toc { transform: none; opacity: 1; transition: none; }
+
+  .search-item,
+  .toc-list li,
+  .note-item { transition: none; }
+
+  .search-item:hover,
+  .search-item:active,
+  .toc-list li:hover,
+  .note-item:hover { transform: none; }
+}
 
 .side-head {
   display: flex;
@@ -1283,7 +1349,9 @@ body:not([data-mode="paged"]) .page-edge { display: none; }
   list-style: none;
   margin: 0;
   padding: 4px 0;
+  /* 悬停时条目右移 2px，不写死横向裁剪会撑出一条横向滚动条 */
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
 }
 
@@ -1291,9 +1359,18 @@ body:not([data-mode="paged"]) .page-edge { display: none; }
   padding: 9px 14px;
   cursor: pointer;
   border-left: 2px solid transparent;
+  /* 只过渡颜色 + transform：前者是极小面积的重绘，后者走合成器 */
+  transition: background 140ms var(--ease), border-color 140ms var(--ease),
+              transform 140ms var(--ease);
 }
 
-.search-item:hover { background: var(--accent-soft); }
+.search-item:hover {
+  background: var(--accent-soft);
+  border-left-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: translateX(2px);
+}
+
+.search-item:active { transform: translateX(2px) scale(.994); }
 
 .search-item.active {
   border-left-color: var(--accent);
@@ -1497,12 +1574,31 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
   max-width: 88vw;
   background: var(--surface);
   border-left: 1px solid var(--border);
+  border-radius: 14px 0 0 14px;
+  box-shadow: -14px 0 34px -18px rgba(15, 23, 42, .45);
   display: flex;
   flex-direction: column;
   z-index: 20;
+  /* 初始态 = 收起（略右移 + 透明），.is-open 才是展开态 */
+  transform: translateX(18px);
+  opacity: 0;
+  transition: transform 180ms var(--ease), opacity 150ms ease-out;
+}
+
+.notes-panel.is-open {
+  transform: translateX(0);
+  opacity: 1;
 }
 
 .notes-panel[hidden] { display: none; }
+
+body[data-theme="dark"] .notes-panel {
+  box-shadow: -14px 0 34px -14px rgba(0, 0, 0, .62);
+}
+
+/* 退场那 180ms 面板还在 DOM 里（只是透明了），别让它截住点击 */
+.toc:not(.is-open),
+.notes-panel:not(.is-open) { pointer-events: none; }
 
 .panel-title { flex: 1; font-size: 14px; font-weight: 500; }
 
@@ -1511,6 +1607,7 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
   margin: 0;
   padding: 4px 0;
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
 }
 
@@ -1519,10 +1616,17 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
 .note-item {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
   cursor: pointer;
+  transition: background 140ms var(--ease), border-color 140ms var(--ease),
+              transform 140ms var(--ease);
 }
 
-.note-item:hover { background: var(--accent-soft); }
+.note-item:hover {
+  background: var(--accent-soft);
+  border-left-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: translateX(2px);
+}
 
 .note-item-head {
   display: flex;
@@ -1594,6 +1698,7 @@ body[data-theme="dark"] .reader-content mark.hl-pink   { --hl-color: rgba(247, 1
 }
 
 .pdf-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1632,6 +1737,9 @@ body[data-theme="dark"] .pdf-page-wrap { background: #f4f2ee; }
 .pdf-hint {
   position: absolute;
   inset: 0;
+  /* 必须压在文字层与批注层之上：文字层是透明文字、批注层是半透明色块，
+     如果盖住提示，「正在渲染…」会淹没在里面看不出内容 */
+  z-index: 4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1672,6 +1780,293 @@ body[data-theme="dark"] .pdf-page-wrap { background: #f4f2ee; }
   flex: 1;
   min-width: 80px;
   accent-color: var(--accent);
+}
+
+/* ---------- PDF 文字层（划选 / 复制 / 搜索高亮） ---------- */
+
+/*
+ * 这一层是盖在 canvas 上的「透明文字」：字本身看不见，但能被鼠标划选、被 Ctrl+C 复制，
+ * 于是 PDF 就有了网页般的选中体验。position/left/top/font-size 全部由 pdf.js 的
+ * TextLayer 内联写入（横向用百分比、字号用 calc(var(--scale-factor) * Npx)）。
+ *
+ * 所以这里只负责三件事：隐形、可选中、给搜索命中上底色。
+ * 尤其**不要**加 padding / border / letter-spacing —— 任何让文字挪位的样式，
+ * 都会让这层透明文字与 canvas 上烤进去的字错开，选中框就会整片偏移。
+ */
+.textLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+
+.textLayer span,
+.textLayer br {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/* 「标记内容」容器只用来挂 id，自身不占位；不压掉它的高度会把文字算两遍 */
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.textLayer ::selection {
+  background: rgba(64, 120, 255, .34);
+}
+
+.textLayer br::selection { background: transparent; }
+
+/* 搜索命中：只上底色，文字保持透明 —— 否则会和 canvas 上原有的字重影 */
+.textLayer mark {
+  margin: 0;
+  padding: 0;
+  border-radius: 2px;
+  background: rgba(255, 202, 74, .5);
+  color: transparent;
+}
+
+.textLayer mark.current { background: #f0a020; }
+
+body[data-theme="dark"] .textLayer mark { background: rgba(255, 202, 74, .3); }
+body[data-theme="dark"] .textLayer mark.current { background: #d9821a; }
+
+/* ---------- PDF 批注层（框选 / 手绘 / 便签） ---------- */
+
+/*
+ * 批注层的锚点是「页码 + 归一化坐标（0~1）」，不是像素。
+ * 所以改缩放、切适应宽度/整页、拉窗口统统不用动数据，只重算一次像素位置即可。
+ */
+
+:root {
+  --mark-yellow: #f5c518;
+  --mark-green: #46b26a;
+  --mark-blue: #4a86e8;
+  --mark-pink: #e86aa6;
+}
+
+.pdf-mark-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* 默认不吃鼠标：文字层要能正常划选、复制。只有激活批注工具才接管 */
+  pointer-events: none;
+  z-index: 2;
+  overflow: visible;
+}
+
+/* 工具激活 → 批注层接管鼠标，同时让开文字层（否则拖拽会变成划选文字） */
+.pdf-page-wrap[data-mark-tool] .pdf-mark-layer {
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pdf-page-wrap[data-mark-tool] .textLayer { pointer-events: none; }
+
+/* 同理，工具激活时便签也让开鼠标 —— 否则想在便签上或旁边画记号，
+   点下去会变成打开便签编辑 */
+.pdf-page-wrap[data-mark-tool] .pdf-note-pin { pointer-events: none; }
+
+/* 已画好的批注只负责显示，点击穿透给画布层（点中删除由批注层自己判定） */
+.pdf-mark-layer .mk-rect {
+  fill-opacity: 0.32;
+  stroke: none;
+}
+
+.pdf-mark-layer .mk-ink {
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+}
+
+.pdf-mark-layer .mk-dot { stroke: none; opacity: 0.85; }
+
+/* 拖拽中的预览：虚线 + 更淡，让人一眼看出「还没落地」 */
+.pdf-mark-layer .mk-draft {
+  fill-opacity: 0.16;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.mk-yellow { fill: var(--mark-yellow); stroke: var(--mark-yellow); }
+.mk-green { fill: var(--mark-green); stroke: var(--mark-green); }
+.mk-blue { fill: var(--mark-blue); stroke: var(--mark-blue); }
+.mk-pink { fill: var(--mark-pink); stroke: var(--mark-pink); }
+
+/* 便签层：容器不吃鼠标，只有气泡自己吃 */
+.pdf-note-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.pdf-note-pin {
+  position: absolute;
+  pointer-events: auto;
+  max-width: 190px;
+  padding: 6px 9px;
+  border-radius: 9px 9px 9px 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #26211a;
+  background: #fff6cf;
+  border: 1px solid rgba(0, 0, 0, .12);
+  box-shadow: 0 4px 14px -6px rgba(15, 23, 42, .5);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  transform-origin: 0 0;
+  transition: opacity .16s var(--ease), transform .16s var(--ease);
+}
+
+.pdf-note-pin:hover { transform: translateY(-1px); }
+
+.pdf-note-pin.is-green { background: #d9f2e0; }
+.pdf-note-pin.is-blue { background: #dce8fd; }
+.pdf-note-pin.is-pink { background: #fbdde9; }
+
+/* 只有锚点、还没写字的便签：显示成一个小小的折角标，别占掉半页 */
+.pdf-note-pin.is-empty {
+  min-width: 22px;
+  min-height: 20px;
+  padding: 3px 6px;
+  color: rgba(38, 33, 26, .5);
+}
+
+.pdf-note-pin .pin-tip { font-size: 11px; }
+
+.pdf-note-pin textarea {
+  display: block;
+  width: 170px;
+  min-height: 58px;
+  max-height: 190px;
+  padding: 2px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+  resize: vertical;
+}
+
+/*
+ * 夜间模式下 PDF 的「纸」仍然是浅色（见 body[data-theme="dark"] .pdf-page-wrap），
+ * 所以便签也保持浅色贴纸的样子 —— 深色贴纸贴在浅色纸面上才是真的不协调。
+ * 只把投影加重一点，免得它和纸面糊在一起。
+ */
+body[data-theme="dark"] .pdf-note-pin {
+  box-shadow: 0 6px 18px -6px rgba(0, 0, 0, .55);
+}
+
+/* 颜色选择点：一排小圆点，选中的那个外圈加环 */
+.mark-colors {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+}
+
+.mark-color {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, .18);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform .14s var(--ease), box-shadow .14s var(--ease);
+}
+
+.mark-color:hover { transform: scale(1.12); }
+
+.mark-color.is-yellow { background: var(--mark-yellow); }
+.mark-color.is-green { background: var(--mark-green); }
+.mark-color.is-blue { background: var(--mark-blue); }
+.mark-color.is-pink { background: var(--mark-pink); }
+
+.mark-color[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent);
+}
+
+/*
+ * 批注工具激活时的操作说明。
+ *
+ * 做成浮在顶栏下方的胶囊，而不是顶栏里的第二行：
+ * 换行会把顶栏撑高 20px → 阅读区跟着变矮 → 「整页」模式下页面立刻多出一条滚动条，
+ * 开关一次工具就抖一下。脱离文档流就完全没有这个问题。
+ *
+ * pointer-events: none 是硬要求 —— 它悬在页面正上方，吃鼠标的话会挡掉正要画的那一笔。
+ */
+.pdf-mark-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  margin: 0;
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 22px -12px rgba(15, 23, 42, .55);
+  pointer-events: none;
+}
+
+.pdf-mark-tip[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pdf-note-pin,
+  .mark-color { transition: none; }
+  .pdf-note-pin:hover,
+  .mark-color:hover { transform: none; }
+}
+
+/* ---------- PDF 搜索面板 ---------- */
+
+/*
+ * 复用正文搜索面板那套 .search-panel / .side-head / .search-results 样式。
+ * top 不在 CSS 里写死：PDF 顶栏会随窗口宽度换行、高度不固定（54px 只是兜底），
+ * 由 app.js 在展开时量出真实高度再写进去，面板才正好贴着顶栏下沿。
+ */
+#pdf-screen .search-panel { z-index: 30; }
+
+#pdf-search-input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+
+#pdf-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* 窄窗口：分组背景退场、分隔线收起，把空间让给按钮（按钮本身换行，不隐藏功能） */

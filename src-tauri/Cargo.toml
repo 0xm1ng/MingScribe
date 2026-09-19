@@ -1,6 +1,6 @@
 [package]
 name = "mingscribe"
-version = "0.3.0"
+version = "0.4.0"
 description = "MingScribe 电子书阅读器（桌面版）"
 authors = ["MingScribe"]
 edition = "2021"

@@ -25,12 +25,13 @@
   var TauriBridge = window.MingScribe.TauriBridge;
   var Cover = window.MingScribe.Cover;
   var Pdf = window.MingScribe.Pdf;
+  var PdfAnnot = window.MingScribe.PdfAnnot;
 
   /**
    * 当前版本号。**必须与 package.json / src-tauri/tauri.conf.json 三处一致**——
    * tests/updater.test.js 里有一条测试专门守这件事，改了不同步会直接测试失败。
    */
-  var APP_VERSION = '0.3.0';
+  var APP_VERSION = '0.4.0';
 
   var FONT_STEPS = [16, 18, 20, 22, 24, 26];
   var DEFAULT_FONT_SIZE = 19;
@@ -68,6 +69,9 @@
   var storage = safeStorage();
   var store = Progress.createStore(storage);
   var annotationStore = Annotations.createStore(storage);
+  // PDF 批注与正文划线是两套锚点（页码+比例 vs 章节+字符偏移），存储也必须分开，
+  // 否则一本书里的两种批注会互相覆盖
+  var pdfMarkStore = PdfAnnot.createStore(storage);
   var bookCache = null;
   var cacheBackend = '';
 
@@ -999,11 +1003,12 @@
 
   function enterReader() {
     resetSearch();
-    closeNotesPanel();
+    // 切屏一律用 resetPanel（立刻消失、不留定时器）：否则面板会在新界面上飘一下
+    resetPanel(el.notesPanel);
     el.shelfScreen.hidden = true;
     el.readerScreen.hidden = false;
     el.readerBookName.textContent = bookTitleOf(state.meta);
-    el.toc.hidden = true;
+    resetPanel(el.toc);
     buildToc();
     renderNotesPanel();
   }
@@ -1011,10 +1016,10 @@
   function backToShelf() {
     flushSave();
     resetSearch();
-    closeNotesPanel();
+    resetPanel(el.notesPanel);
     el.readerScreen.hidden = true;
     el.shelfScreen.hidden = false;
-    el.toc.hidden = true;
+    resetPanel(el.toc);
     state.book = null;
     state.meta = null;
     renderShelf();
@@ -1040,7 +1045,16 @@
     fit: 'page',    // 'width' | 'page' | 'manual'
     token: 0,
     resumed: false, // 这次打开是不是从上次位置续读的
-    announced: false // 首次渲染完成后只提示一次，翻页不要每次都弹
+    announced: false, // 首次渲染完成后只提示一次，翻页不要每次都弹
+
+    // 每页的纯文本，下标 0 = 第 1 页。搜索要扫全书，抽一次就缓存住，
+    // 否则每敲一个字就重抽一遍（几百页的 PDF 会卡到没法用）。
+    texts: null,
+    // 当前页文字层里的 span 与其原始文本：搜索高亮靠「还原成原文再重画」来清除，
+    // 记住原文比事后去拆 <mark> 可靠得多。
+    spanEls: null,
+    spanTexts: null,
+    search: { query: '', results: [], index: -1, token: 0 }
   };
 
   function pdfScreenOpen() {
@@ -1080,6 +1094,9 @@
         pdfState.total = doc.numPages || 0;
         pdfState.book = Pdf.syntheticBook(pdfState.total, meta.title);
         pdfState.fit = 'page';
+        // 换了文件，上一本抽出来的文字和搜索结果必须作废，
+        // 否则会拿旧书的文本去回答新书的搜索
+        resetPdfSearch();
 
         if (!pdfState.total) {
           toast('这个 PDF 里没有可显示的页面');
@@ -1122,6 +1139,8 @@
 
   function closePdf() {
     savePdfProgress();
+    resetPdfSearch();
+    resetPdfMarks();
     if (pdfState.doc && typeof pdfState.doc.destroy === 'function') {
       try { pdfState.doc.destroy(); } catch (err) { /* 销毁失败不影响使用 */ }
     }
@@ -1132,6 +1151,7 @@
     pdfState.announced = false;
     pdfState.resumed = false;
     el.pdfScreen.hidden = true;
+    el.pdfTextLayer.textContent = '';
     el.pdfHint.hidden = false;
     el.pdfHint.textContent = '正在渲染…';
     el.shelfScreen.hidden = false;
@@ -1164,15 +1184,17 @@
 
     el.pdfHint.hidden = false;
     el.pdfHint.textContent = '正在渲染第 ' + page + ' 页…';
+    // 先清掉上一页的文字层：新页面渲染失败时，残留的旧文字层会让人
+    // 选中错误的内容（看得见 PDF 比能选中更重要，但也不能给错的）
+    el.pdfTextLayer.textContent = '';
+    pdfState.spanEls = null;
+    pdfState.spanTexts = null;
 
     engine.pageSize(pdfState.doc, page).then(function (size) {
       if (token !== pdfState.token) return;
 
-      // 留 48px 内边距，页面不会贴着窗口边缘
-      var available = {
-        width: Math.max(200, (el.pdfView.clientWidth || 900) - 48),
-        height: Math.max(200, (el.pdfView.clientHeight || 600) - 48)
-      };
+      // 留 48px 内边距，页面不会贴着窗口边缘；开着搜索面板时再让开面板那一块
+      var available = pdfAvailableSize();
       var scale = pdfState.fit === 'manual'
         ? Pdf.clampScale(pdfState.scale)
         : Pdf.fitScale(available, size, pdfState.fit);
@@ -1181,7 +1203,7 @@
       el.pdfZoomVal.textContent = Pdf.scaleLabel(scale);
       el.pdfStatus.textContent = '第 ' + page + ' 页 · 共 ' + pdfState.total + ' 页';
 
-      return engine.render(pdfState.doc, page, el.pdfCanvas, scale).then(function () {
+      return engine.render(pdfState.doc, page, el.pdfCanvas, scale).then(function (res) {
         if (token !== pdfState.token) return;
         el.pdfHint.hidden = true;
         // 打开时的「正在打开…」是常驻提示，必须由首屏渲染结果把它顶掉
@@ -1191,6 +1213,14 @@
             ? '已恢复到上次读到第 ' + pdfState.page + ' 页'
             : '已打开：共 ' + pdfState.total + ' 页');
         }
+        return attachPdfTextLayer(page, res && res.viewport, scale, token);
+      }).catch(function (err) {
+        // canvas 渲染失败要说话。注意这个 catch 挂在 render 的链上 ——
+        // 只有 pageSize 的失败会走上面的 onRejected，渲染本身失败得靠这里
+        if (token !== pdfState.token) return;
+        el.pdfHint.hidden = false;
+        el.pdfHint.textContent = '第 ' + page + ' 页渲染失败：' +
+          (err && err.message ? err.message : '未知错误');
       });
     }, function (err) {
       if (token !== pdfState.token) return;
@@ -1227,13 +1257,949 @@
     renderPdfPage();
   }
 
+  /* ---------------- PDF 文字层与全文搜索 ---------------- */
+
+  /**
+   * 给刚渲染完的这一页盖上透明文字层，再补画搜索高亮。
+   *
+   * 文字层失败只降级成「不能划选」，绝不能让整份 PDF 打不开 ——
+   * 所以这里吞掉异常：看得见 PDF 比能选中更重要。
+   */
+  function attachPdfTextLayer(page, viewport, scale, token) {
+    if (!viewport) return Promise.resolve();
+
+    // pdf.js 用 calc(var(--scale-factor) * Npx) 算字号、算图层宽高。
+    // 这个变量不给，calc 直接失效、图层尺寸退化成 auto，文字会全堆在左上角。
+    el.pdfTextLayer.style.setProperty('--scale-factor', String(scale));
+
+    return Pdf.engine().textLayer(pdfState.doc, page, el.pdfTextLayer, viewport)
+      .catch(function () {
+        // 只降级「不能划选 / 不能标高亮」，PDF 照常看 —— 但必须说出来，
+        // 否则用户会以为是自己的操作不对（「怎么选不中」）。
+        el.pdfStatus.textContent = '第 ' + page + ' 页 · 共 ' + pdfState.total +
+          ' 页 · 文字层不可用（不能划选 / 搜索）';
+        return null;
+      })
+      .then(function () {
+        if (token !== pdfState.token) return;
+        collectPdfSpans();
+        paintPdfHits();
+        // 批注也要跟着重画：缩放变了、翻页了，归一化坐标要重新换算成像素
+        paintPdfMarks();
+      });
+  }
+
+  /**
+   * 收集当前页文字层里的 span 与各自原文。
+   *
+   * 必须排除 .markedContent —— 那是 pdf.js 套在文字外面的壳，文字是它的子节点，
+   * 一起算进去的话同一段文字会被数两遍，搜索高亮就会画错位置。
+   */
+  function collectPdfSpans() {
+    pdfState.spanEls = [];
+    pdfState.spanTexts = [];
+    var layer = el.pdfTextLayer;
+    if (!layer) return;
+
+    var spans = layer.querySelectorAll('span');
+    for (var i = 0; i < spans.length; i++) {
+      var span = spans[i];
+      if (String(span.className || '').indexOf('markedContent') >= 0) continue;
+      pdfState.spanEls.push(span);
+      pdfState.spanTexts.push(span.textContent || '');
+    }
+  }
+
+  /** 擦掉当前页的高亮：把 span 还原成原始文本，比事后拆 <mark> 可靠。 */
+  function clearPdfHits() {
+    var els = pdfState.spanEls;
+    var texts = pdfState.spanTexts;
+    if (!els || !texts) return;
+    for (var i = 0; i < els.length; i++) {
+      if (!els[i] || !els[i].querySelector('mark')) continue;
+      els[i].textContent = texts[i];
+    }
+  }
+
+  /**
+   * 在当前页画出搜索命中。
+   *
+   * 切分交给 Pdf.spanRanges：命中横跨两三个 span 是常态，而它和搜索用的是
+   * 同一套「去空白」索引，所以「搜得到」与「画得出」必然一致。
+   */
+  function paintPdfHits() {
+    clearPdfHits();
+
+    // 面板关着就不画：高亮只在搜索面板打开时才该出现。
+    // 有了这道闸，关闭面板后即便因为重排又渲染了一次页面，也不会把高亮画回来。
+    if (!pdfSearchOpen()) return;
+
+    var query = pdfState.search.query;
+    if (!Pdf.normalizeQuery(query)) return;
+    if (!pdfState.spanEls || !pdfState.spanEls.length) return;
+
+    var ranges = Pdf.spanRanges(pdfState.spanTexts, query);
+    if (!ranges.length) return;
+
+    var bySpan = {};
+    var i;
+    for (i = 0; i < ranges.length; i++) {
+      var r = ranges[i];
+      if (!bySpan[r.spanIndex]) bySpan[r.spanIndex] = [];
+      bySpan[r.spanIndex].push(r);
+    }
+
+    // 当前这一处是本页第几处命中：spanRanges 给的 seq 是「页内」序号，
+    // 而 search.index 是「全书」序号，得先数出本页之前有多少条。
+    // （单页命中超过 maxPerPage 时列表会截断，这种极端情况下「当前处」的重色
+    //   可能标在相邻一处上 —— 只影响那一格的颜色，跳页位置仍然准确。）
+    var currentSeq = -1;
+    var hit = pdfState.search.index >= 0 ? pdfState.search.results[pdfState.search.index] : null;
+    if (hit && hit.page === pdfState.page) {
+      currentSeq = 0;
+      for (i = 0; i < pdfState.search.index; i++) {
+        if (pdfState.search.results[i].page === pdfState.page) currentSeq++;
+      }
+    }
+
+    Object.keys(bySpan).forEach(function (key) {
+      var idx = Number(key);
+      var span = pdfState.spanEls[idx];
+      if (!span) return;
+
+      var text = pdfState.spanTexts[idx];
+      var parts = bySpan[key].slice().sort(function (a, b) { return a.start - b.start; });
+
+      var frag = document.createDocumentFragment();
+      var at = 0;
+      parts.forEach(function (part) {
+        var from = Math.max(at, Math.min(part.start, text.length));
+        var to = Math.max(from, Math.min(part.end, text.length));
+        if (from > at) frag.appendChild(document.createTextNode(text.slice(at, from)));
+        var mark = document.createElement('mark');
+        if (part.seq === currentSeq) mark.className = 'current';
+        mark.textContent = text.slice(from, to);
+        frag.appendChild(mark);
+        at = to;
+      });
+      if (at < text.length) frag.appendChild(document.createTextNode(text.slice(at)));
+
+      span.textContent = '';
+      span.appendChild(frag);
+    });
+
+    scrollToCurrentPdfHit();
+  }
+
+  /** 让当前命中落在可视区中间；已经在视野里就不动，免得每跳一处都拽一下页面。 */
+  function scrollToCurrentPdfHit() {
+    var layer = el.pdfTextLayer;
+    var view = el.pdfView;
+    if (!layer || !view) return;
+
+    var mark = layer.querySelector('mark.current');
+    if (!mark || typeof mark.getBoundingClientRect !== 'function') return;
+
+    var mr = mark.getBoundingClientRect();
+    var vr = view.getBoundingClientRect();
+    if (mr.top >= vr.top + 8 && mr.bottom <= vr.bottom - 8) return;
+
+    // 自己算 scrollTop，不用 scrollIntoView —— 后者会连带滚动整个文档
+    view.scrollTop = Math.max(0, view.scrollTop + (mr.top - vr.top) - (vr.height / 2) + (mr.height / 2));
+  }
+
+  /* ---------------- PDF 批注（框选 / 手绘 / 便签） ---------------- */
+
+  /*
+   * 这一层锚在「页码 + 0~1 归一化坐标」上（见 src/pdfannot.js 顶部说明）。
+   * 交互上有两条铁律：
+   *  ① 没选工具时，批注层必须完全不吃鼠标 —— 否则 PDF 的文字划选就废了；
+   *  ② 有工具时反向让开文字层，否则一拖拽就变成选字，画不出东西。
+   * 两条都靠 .pdf-page-wrap[data-mark-tool] 这一个开关在 CSS 里成对切换。
+   */
+
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  var PDF_MARK_TIP = {
+    rect: '框选：按住拖出一个方块；点一下已有的批注就删掉它；再点一次「框选」退出',
+    ink: '手绘：按住拖出笔迹；点一下留一个小点；再点一次「手绘」退出',
+    note: '便签：点一下贴一张，写完点别处即保存（Ctrl+Enter 收起）；再点一次「便签」退出'
+  };
+
+  var pdfMark = {
+    tool: '',        // '' | 'rect' | 'ink' | 'note'
+    color: 'yellow',
+    items: [],       // 当前页的批注
+    startAt: null,   // 本次拖拽的起点（归一化）
+    anchor: null,    // 矩形拖拽的固定角
+    draft: null,     // 拖拽中的矩形（归一化）
+    ink: null,       // 拖拽中的笔迹点（归一化）
+    moved: false,    // 这次拖拽有没有真的拖动过（没动 = 点了一下）
+    editingId: null  // 正在编辑的便签 id
+  };
+
+  function svgEl(tag, attrs) {
+    var node = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, String(attrs[k])); });
+    return node;
+  }
+
+  /** 批注层的像素尺寸 —— 一律现量，写完 CSS 改布局也不用同步常量。 */
+  function pdfMarkSize() {
+    var layer = el.pdfMarkLayer;
+    if (!layer || typeof layer.getBoundingClientRect !== 'function') return { w: 0, h: 0 };
+    var r = layer.getBoundingClientRect();
+    return { w: r.width, h: r.height };
+  }
+
+  /** 鼠标事件 → 归一化坐标（0~1）。 */
+  function pdfMarkPoint(evt) {
+    var layer = el.pdfMarkLayer;
+    if (!layer || typeof layer.getBoundingClientRect !== 'function') return null;
+    var r = layer.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: (evt.clientX - r.left) / r.width, y: (evt.clientY - r.top) / r.height };
+  }
+
+  function pdfMarkBookKey() {
+    return pdfState.meta ? pdfState.meta.key : '';
+  }
+
+  function pdfMarkReload() {
+    var key = pdfMarkBookKey();
+    pdfMark.items = key ? pdfMarkStore.byPage(key, pdfState.page) : [];
+  }
+
+  function setPdfMarkBtn(btn, on) {
+    if (!btn) return;
+    btn.classList.toggle('active', !!on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
+  /**
+   * 把当前页的批注重画一遍。
+   *
+   * 全量重画而不是「增量改 DOM」：一页的批注最多几十条，
+   * 重建的开销远小于维护增量状态的复杂度，也不会出现「删了还留着影子」。
+   */
+  function paintPdfMarks() {
+    var layer = el.pdfMarkLayer;
+    var notes = el.pdfNoteLayer;
+    if (!layer || !notes) return;
+
+    layer.textContent = '';
+    notes.textContent = '';
+
+    if (!pdfScreenOpen() || !pdfState.total) return;
+    var size = pdfMarkSize();
+    if (!size.w || !size.h) return;
+
+    pdfMarkReload();
+
+    pdfMark.items.forEach(function (rec) {
+      var cls = 'mk-' + rec.color;
+      if (rec.kind === 'rect') {
+        var b = PdfAnnot.rectBox(rec.rect, size.w, size.h);
+        layer.appendChild(svgEl('rect', {
+          x: b.x, y: b.y, width: b.width, height: b.height, rx: 2, class: 'mk-rect ' + cls
+        }));
+        return;
+      }
+      if (rec.kind === 'ink') {
+        var pts = rec.points || [];
+        if (pts.length === 1) {
+          var p = PdfAnnot.pointAt(pts[0], size.w, size.h);
+          layer.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 2.8, class: 'mk-dot ' + cls }));
+          return;
+        }
+        var d = PdfAnnot.pathOf(pts, size.w, size.h);
+        if (d) layer.appendChild(svgEl('path', { d: d, class: 'mk-ink ' + cls }));
+        return;
+      }
+      if (rec.kind === 'note') notes.appendChild(pdfNotePin(rec, size));
+    });
+
+    // 拖拽预览画在最上层，虚线以示「还没落地」
+    if (pdfMark.draft) {
+      var db = PdfAnnot.rectBox(pdfMark.draft, size.w, size.h);
+      layer.appendChild(svgEl('rect', {
+        x: db.x, y: db.y, width: db.width, height: db.height, rx: 2,
+        class: 'mk-rect mk-draft mk-' + pdfMark.color
+      }));
+    }
+    if (pdfMark.ink && pdfMark.ink.length > 1) {
+      var dd = PdfAnnot.pathOf(pdfMark.ink, size.w, size.h);
+      if (dd) {
+        layer.appendChild(svgEl('path', {
+          d: dd, class: 'mk-ink mk-draft mk-' + pdfMark.color
+        }));
+      }
+    }
+  }
+
+  /** 一张便签气泡。没写字时缩成一个小标记，别挡着正文。 */
+  function pdfNotePin(rec, size) {
+    var p = PdfAnnot.pointAt(rec.at, size.w, size.h);
+    var pin = document.createElement('div');
+    pin.className = 'pdf-note-pin is-' + rec.color + (rec.note ? '' : ' is-empty');
+    pin.setAttribute('data-mark-id', rec.id);
+    pin.style.left = p.x + 'px';
+    pin.style.top = p.y + 'px';
+
+    if (rec.note) {
+      pin.textContent = rec.note;
+      pin.title = rec.note;
+    } else {
+      pin.appendChild(document.createTextNode('签'));
+      pin.title = '空便签：点一下写字';
+    }
+    return pin;
+  }
+
+  /** 就地编辑便签：点开是 textarea，失焦即保存。 */
+  function startPdfNoteEdit(rec, pin) {
+    if (!rec || !pin || pdfMark.editingId === rec.id) return;
+    pdfMark.editingId = rec.id;
+
+    pin.classList.remove('is-empty');
+    pin.textContent = '';
+
+    var area = document.createElement('textarea');
+    area.value = rec.note || '';
+    area.setAttribute('aria-label', '便签内容');
+    pin.appendChild(area);
+    pin.classList.add('is-editing');
+    area.focus();
+
+    var finish = function (save) {
+      if (pdfMark.editingId !== rec.id) return;
+      pdfMark.editingId = null;
+      if (save && area.value !== (rec.note || '')) {
+        var res = pdfMarkStore.updateNote(rec.id, area.value);
+        if (!res.ok) toast('便签没保存成功，请再试一次');
+      }
+      paintPdfMarks();
+    };
+
+    area.addEventListener('blur', function () { finish(true); });
+    area.addEventListener('keydown', function (e) {
+      // 这两个键必须在这里拦下：继续冒泡会触发全局快捷键（Esc 直接退出阅读）
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); area.blur(); }
+      e.stopPropagation();
+    });
+  }
+
+  function setPdfMarkTool(tool) {
+    var next = pdfMark.tool === tool ? '' : tool;
+    pdfMark.tool = PdfAnnot.isKind(next) ? next : '';
+    pdfMark.startAt = null;
+    pdfMark.anchor = null;
+    pdfMark.draft = null;
+    pdfMark.ink = null;
+    pdfMark.moved = false;
+
+    if (el.pdfPageWrap) {
+      if (pdfMark.tool) el.pdfPageWrap.setAttribute('data-mark-tool', pdfMark.tool);
+      else el.pdfPageWrap.removeAttribute('data-mark-tool');
+    }
+
+    setPdfMarkBtn(el.pdfMarkRect, pdfMark.tool === 'rect');
+    setPdfMarkBtn(el.pdfMarkInk, pdfMark.tool === 'ink');
+    setPdfMarkBtn(el.pdfMarkNote, pdfMark.tool === 'note');
+
+    if (el.pdfMarkTip) {
+      el.pdfMarkTip.hidden = !pdfMark.tool;
+      el.pdfMarkTip.textContent = pdfMark.tool ? PDF_MARK_TIP[pdfMark.tool] : '';
+    }
+
+    paintPdfMarks();
+  }
+
+  function setPdfMarkColor(color) {
+    pdfMark.color = PdfAnnot.normalizeColor(color);
+    var btns = el.pdfMarkColors ? el.pdfMarkColors.querySelectorAll('.mark-color') : [];
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute('aria-pressed',
+        btns[i].getAttribute('data-color') === pdfMark.color ? 'true' : 'false');
+    }
+  }
+
+  /** 退出阅读或换书时把批注层的临时状态清干净，别留到下一本上。 */
+  function resetPdfMarks() {
+    pdfMark.tool = '';
+    pdfMark.startAt = null;
+    pdfMark.anchor = null;
+    pdfMark.draft = null;
+    pdfMark.ink = null;
+    pdfMark.moved = false;
+    pdfMark.editingId = null;
+    pdfMark.items = [];
+
+    if (el.pdfPageWrap) el.pdfPageWrap.removeAttribute('data-mark-tool');
+    if (el.pdfMarkLayer) el.pdfMarkLayer.textContent = '';
+    if (el.pdfNoteLayer) el.pdfNoteLayer.textContent = '';
+    if (el.pdfMarkTip) { el.pdfMarkTip.hidden = true; el.pdfMarkTip.textContent = ''; }
+    setPdfMarkBtn(el.pdfMarkRect, false);
+    setPdfMarkBtn(el.pdfMarkInk, false);
+    setPdfMarkBtn(el.pdfMarkNote, false);
+  }
+
+  function savePdfMark(input) {
+    var bookKey = pdfMarkBookKey();
+    if (!bookKey) return null;
+
+    var res = pdfMarkStore.add(Object.assign({ bookKey: bookKey, now: Date.now() }, input));
+    if (!res.ok) {
+      toast(res.reason === 'invalid'
+        ? '没记上：' + (res.message || '范围太小')
+        : '批注保存失败，可能是本地存储已满');
+      paintPdfMarks();
+      return null;
+    }
+
+    paintPdfMarks();
+    // 便签刚落下来就直接进入编辑 —— 否则要再点一次才能写字
+    if (res.record.kind === 'note') {
+      var pin = el.pdfNoteLayer.querySelector('[data-mark-id="' + res.record.id + '"]');
+      if (pin) startPdfNoteEdit(res.record, pin);
+    }
+    return res.record;
+  }
+
+  /** 点中哪条就删哪条；从后往前找，后画的压在上层。 */
+  function deletePdfMarkAt(nx, ny) {
+    for (var i = pdfMark.items.length - 1; i >= 0; i--) {
+      if (!PdfAnnot.hitTest(pdfMark.items[i], nx, ny)) continue;
+      if (!pdfMarkStore.remove(pdfMark.items[i].id)) {
+        toast('删除没成功，请再试一次');
+        return false;
+      }
+      toast('已删掉这一处批注');
+      paintPdfMarks();
+      return true;
+    }
+    return false;
+  }
+
+  function undoPdfMark() {
+    var bookKey = pdfMarkBookKey();
+    if (!bookKey) return;
+    var removed = pdfMarkStore.popLatest(bookKey);
+    if (!removed) {
+      toast('这本 PDF 还没有批注');
+      return;
+    }
+    toast('已撤销第 ' + removed.page + ' 页的最后一处批注');
+    paintPdfMarks();
+  }
+
+  /* 拖拽三个动作：按下记起点 → 移动记轨迹 → 抬起落数据 */
+
+  function onPdfMarkDown(evt) {
+    if (!pdfMark.tool || evt.button !== 0) return;
+
+    // 便签正在编辑时，这一下「点到别处」的用意是收尾，不是再贴一张新的。
+    // 不拦的话：写完便签随手点空白处想关掉，屏幕上会凭空多出一张空便签。
+    // 这里只 return、不 preventDefault —— 得让焦点照常移走，textarea 的 blur 才会触发保存。
+    if (pdfMark.editingId) return;
+
+    var pt = pdfMarkPoint(evt);
+    if (!pt) return;
+
+    evt.preventDefault();
+    try { el.pdfMarkLayer.setPointerCapture(evt.pointerId); } catch (err) { /* 不支持就算了 */ }
+
+    pdfMark.startAt = pt;
+    pdfMark.moved = false;
+    // 顺手清掉上一次的残留：只要有一次 pointerup 没送到（比如在窗口外松手），
+    // 草稿就会挂在那里，下一次点击会把它当成新画的框存下去。
+    pdfMark.draft = null;
+    pdfMark.ink = null;
+    if (pdfMark.tool === 'rect') pdfMark.anchor = pt;
+    if (pdfMark.tool === 'ink') pdfMark.ink = [pt];
+  }
+
+  function onPdfMarkMove(evt) {
+    if (!pdfMark.tool || !pdfMark.startAt) return;
+    var pt = pdfMarkPoint(evt);
+    if (!pt) return;
+
+    evt.preventDefault();
+    var dx = pt.x - pdfMark.startAt.x;
+    var dy = pt.y - pdfMark.startAt.y;
+    if (Math.sqrt(dx * dx + dy * dy) >= PdfAnnot.MIN_SIDE) pdfMark.moved = true;
+
+    if (pdfMark.tool === 'rect') {
+      pdfMark.draft = PdfAnnot.normalizeRect(pdfMark.anchor.x, pdfMark.anchor.y, pt.x, pt.y);
+    } else if (pdfMark.tool === 'ink') {
+      pdfMark.ink = PdfAnnot.thinPoints((pdfMark.ink || []).concat([pt]));
+    }
+    paintPdfMarks();
+  }
+
+  function onPdfMarkUp(evt) {
+    if (!pdfMark.tool || !pdfMark.startAt) return;
+
+    // 先把本次拖拽的状态取走再清空：下面几个分支都要用，清早了就没了
+    var tool = pdfMark.tool;
+    var start = pdfMark.startAt;
+    var draft = pdfMark.draft;
+    var ink = pdfMark.ink;
+    var moved = pdfMark.moved;
+
+    pdfMark.startAt = null;
+    pdfMark.anchor = null;
+    pdfMark.draft = null;
+    pdfMark.ink = null;
+    pdfMark.moved = false;
+
+    try { el.pdfMarkLayer.releasePointerCapture(evt.pointerId); } catch (err) { /* 忽略 */ }
+
+    if (tool === 'rect') {
+      if (!moved || !draft) {
+        // 没真正拖动 = 只是点了一下：压在下面的批注就删掉它，否则什么也不做
+        if (!deletePdfMarkAt(start.x, start.y)) paintPdfMarks();
+        return;
+      }
+      savePdfMark({ kind: 'rect', page: pdfState.page, rect: draft, color: pdfMark.color });
+      return;
+    }
+
+    if (tool === 'ink') {
+      savePdfMark({
+        kind: 'ink',
+        page: pdfState.page,
+        points: moved ? ink : [start],
+        color: pdfMark.color
+      });
+      return;
+    }
+
+    if (tool === 'note') {
+      savePdfMark({ kind: 'note', page: pdfState.page, x: start.x, y: start.y, color: pdfMark.color });
+    }
+  }
+
+  function bindPdfMarkEvents() {
+    if (el.pdfMarkLayer) {
+      // 只有「按下」挂在页面上：它负责判断这一下是不是落在纸面里。
+      el.pdfMarkLayer.addEventListener('pointerdown', onPdfMarkDown);
+    }
+
+    /*
+     * 移动和松开一律挂在 window 上，不挂在批注层：
+     *  - 指针离开纸面（拖出页框、拖到工具栏上、松手时鼠标已经在窗口外）也照样收得到，
+     *    否则草稿会僵在纸面上，下一次点击又会把它当成新框存进去；
+     *  - 也就不再依赖 setPointerCapture 是否生效（上面那个 try 兜的就是它）。
+     * 两个处理器本身都有 `pdfMark.startAt` 兜底，没在拖拽时进来会立刻返回，
+     * 所以挂这么宽不会有副作用。
+     */
+    window.addEventListener('pointermove', onPdfMarkMove);
+    window.addEventListener('pointerup', onPdfMarkUp);
+    window.addEventListener('pointercancel', onPdfMarkUp);
+
+    if (el.pdfMarkRect) {
+      el.pdfMarkRect.addEventListener('click', function () { setPdfMarkTool('rect'); });
+    }
+    if (el.pdfMarkInk) {
+      el.pdfMarkInk.addEventListener('click', function () { setPdfMarkTool('ink'); });
+    }
+    if (el.pdfMarkNote) {
+      el.pdfMarkNote.addEventListener('click', function () { setPdfMarkTool('note'); });
+    }
+    if (el.pdfMarkUndo) {
+      el.pdfMarkUndo.addEventListener('click', undoPdfMark);
+    }
+    if (el.pdfMarkColors) {
+      el.pdfMarkColors.addEventListener('click', function (evt) {
+        var node = evt.target;
+        while (node && node !== el.pdfMarkColors && !(node.classList && node.classList.contains('mark-color'))) {
+          node = node.parentNode;
+        }
+        if (!node || node === el.pdfMarkColors) return;
+        setPdfMarkColor(node.getAttribute('data-color'));
+      });
+    }
+
+    // 便签气泡：点一下就写。用事件委托，省得每张便签都挂监听
+    if (el.pdfNoteLayer) {
+      el.pdfNoteLayer.addEventListener('click', function (evt) {
+        var node = evt.target;
+        while (node && node !== el.pdfNoteLayer && !(node.classList && node.classList.contains('pdf-note-pin'))) {
+          node = node.parentNode;
+        }
+        if (!node || node === el.pdfNoteLayer) return;
+        var rec = pdfMarkStore.get(node.getAttribute('data-mark-id'));
+        if (rec) startPdfNoteEdit(rec, node);
+      });
+    }
+
+    setPdfMarkColor(pdfMark.color);
+  }
+
+  /* ---------------- 面板浮现（正文搜索 / PDF 搜索共用） ---------------- */
+
+  /*
+   * 面板进出场只做 translateX + opacity 两件事，剩下的全交给 CSS transition：
+   * 没有 setInterval / requestAnimationFrame 循环，也没有逐帧改样式，
+   * 所以不存在「动画常驻吃内存、掉帧」这类问题；动画结束浏览器自动回收图层。
+   *
+   * PANEL_ANIM_MS 必须与 style.css 里 .search-panel 的 transition 时长一致：
+   * 比它短 → 面板在动画播完前就 display:none，退场动画等于白写。
+   */
+  var PANEL_ANIM_MS = 180;
+  var panelHideTimers = {};
+
+  /** 抽文字抽到第几页就先给一次「像不像扫描件」的结论（读完整本可能上百秒）。 */
+  var PDF_SCAN_PROBE_PAGES = 5;
+
+  function prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * 展开面板并播入场动画。
+   * hidden 一去掉就立刻加 is-open（中间读一次 offsetWidth 强制浏览器先算出「收起态」，
+   * 否则两个变化在同一帧里合并，transition 根本不会跑）—— 这样 is-open 与
+   * 「面板算不算开着」永远是同步的，不会出现「已经开了但宽度还没让出去」的错位。
+   */
+  function showPanel(panel) {
+    if (!panel) return;
+    var timer = panelHideTimers[panel.id];
+    if (timer) { clearTimeout(timer); delete panelHideTimers[panel.id]; }
+
+    if (panel.hidden) {
+      panel.classList.remove('is-open');
+      panel.hidden = false;
+      void panel.offsetWidth; // 强制一次样式计算，给 transition 一个起始状态
+    }
+    panel.classList.add('is-open');
+  }
+
+  /**
+   * 收起面板：先播退场动画，动画走完再真正 hidden。
+   * is-open 是立刻摘掉的，所以凡是问「面板开着吗」的判断（宽度让位、要不要画高亮）
+   * 马上就会按「已关闭」处理 —— 不会出现在飘走的过程中页面宽度还被占着的情况。
+   */
+  function hidePanel(panel) {
+    if (!panel || panel.hidden) return;
+    panel.classList.remove('is-open');
+
+    function finish() {
+      delete panelHideTimers[panel.id];
+      // 期间又被打开了就别收了（showPanel 会清定时器，这里是兜底）
+      if (panel.classList.contains('is-open')) return;
+      panel.hidden = true;
+    }
+
+    if (prefersReducedMotion()) { finish(); return; }
+
+    var timer = panelHideTimers[panel.id];
+    if (timer) clearTimeout(timer);
+    panelHideTimers[panel.id] = setTimeout(finish, PANEL_ANIM_MS);
+  }
+
+  /** 强制收起（关书、切屏）：不留动画、不留定时器。 */
+  function resetPanel(panel) {
+    if (!panel) return;
+    var timer = panelHideTimers[panel.id];
+    if (timer) { clearTimeout(timer); delete panelHideTimers[panel.id]; }
+    panel.classList.remove('is-open');
+    panel.hidden = true;
+  }
+
+  /** 清空搜索状态与逐页文字缓存（换书 / 关书时调用）。 */
+  function resetPdfSearch() {
+    if (pdfSearchTimer) { clearTimeout(pdfSearchTimer); pdfSearchTimer = 0; }
+    pdfState.search.token++;
+    pdfState.search.query = '';
+    pdfState.search.results = [];
+    pdfState.search.index = -1;
+    pdfState.texts = null;
+    pdfState.spanEls = null;
+    pdfState.spanTexts = null;
+
+    if (el.pdfSearchPanel) {
+      resetPanel(el.pdfSearchPanel);
+      // 面板不在了，页面要让回那一块宽度
+      if (el.pdfView) syncPdfSearchPanelBox();
+      el.pdfSearchInput.value = '';
+      el.pdfSearchResults.textContent = '';
+      el.pdfSearchCount.textContent = '输入关键词，在整份 PDF 里搜索。';
+    }
+  }
+
+  /**
+   * 面板算不算「开着」。
+   * 除了 hidden 还看 is-open：退场动画那 180ms 里面板还在 DOM 中，但宽度必须
+   * 立刻还回去、高亮也必须立刻擦掉，否则会看到「面板在飘走、页面还缩着」的错位。
+   */
+  function pdfSearchOpen() {
+    return !!(el.pdfSearchPanel && !el.pdfSearchPanel.hidden &&
+      el.pdfSearchPanel.classList.contains('is-open'));
+  }
+
+  function openPdfSearch() {
+    if (!pdfState.doc) return;
+    showPanel(el.pdfSearchPanel);
+    // 先量尺寸再重排：可用宽度要扣掉「让给面板的那一块」
+    syncPdfSearchPanelBox();
+    try {
+      el.pdfSearchInput.focus();
+      el.pdfSearchInput.select();
+    } catch (err) { /* 聚焦失败不影响搜索 */ }
+
+    // 面板开了，页面可用宽度变小；适应模式下要按新宽度重画，否则右侧会被面板盖住。
+    // 手动缩放过的不动 —— 那是用户自己定的比例，不该被我们改掉。
+    // （重画时 attachPdfTextLayer 会顺带把高亮补上。）
+    if (pdfState.fit !== 'manual') renderPdfPage();
+    else if (pdfState.search.results.length) paintPdfHits();
+  }
+
+  /**
+   * 把搜索面板的位置与页面的可用宽度对齐。
+   *
+   * 面板是浮层（绝对定位），不会把 .pdf-view 挤窄，所以必须主动做两件事：
+   *  ① 上边贴顶栏下沿、下边贴底栏上沿 —— 顶栏在窄窗口会换行、底栏高度也随字号变，
+   *     写死像素必然对不齐；
+   *  ② 给 .pdf-view 留出与面板等宽的右内边距 —— 不这么做的话，「适应宽度」下
+   *     页面铺满整个窗口，右侧那一块被面板盖住，命中高亮很可能正好藏在后面。
+   * 面板自身宽度（340px，窄窗口还会更窄）也在这里量，避免 CSS 与 JS 各写一份常数。
+   */
+  function syncPdfSearchPanelBox() {
+    if (!el.pdfScreen || !el.pdfSearchPanel) return;
+
+    var inset = 0;
+    if (pdfSearchOpen()) {
+      var bar = el.pdfScreen.querySelector('.pdf-bar');
+      var foot = el.pdfScreen.querySelector('.pdf-foot');
+      var top = bar ? bar.offsetHeight : 0;
+      var bottom = foot ? foot.offsetHeight : 0;
+      if (top > 0) el.pdfSearchPanel.style.top = top + 'px';
+      if (bottom > 0) el.pdfSearchPanel.style.bottom = bottom + 'px';
+      inset = el.pdfSearchPanel.offsetWidth || 0;
+    }
+    // 24 是 .pdf-view 原有的内边距
+    el.pdfView.style.paddingRight = inset ? (24 + inset) + 'px' : '';
+  }
+
+  /** 一页能用的 CSS 像素尺寸（扣掉内边距与搜索面板）。 */
+  function pdfAvailableSize() {
+    var inset = pdfSearchOpen() ? (el.pdfSearchPanel.offsetWidth || 0) : 0;
+    return {
+      width: Math.max(200, (el.pdfView.clientWidth || 900) - 48 - inset),
+      height: Math.max(200, (el.pdfView.clientHeight || 600) - 48)
+    };
+  }
+
+  function closePdfSearch() {
+    if (!pdfSearchOpen()) return;
+    // 先收面板（is-open 立刻摘掉，宽度随即还回来），再擦高亮、按新宽度重排
+    hidePanel(el.pdfSearchPanel);
+    syncPdfSearchPanelBox();
+    clearPdfHits();
+    // 此刻面板已隐藏，paintPdfHits 里那道「面板关着就不画」的闸会让高亮不会复活
+    if (pdfState.fit !== 'manual' && pdfState.doc) renderPdfPage();
+  }
+
+  function setPdfSearchStatus(text) {
+    el.pdfSearchCount.textContent = text;
+  }
+
+  /**
+   * 逐页抽出文字并缓存。token 一旦变了（换了关键词 / 关了文件）立刻收工，
+   * 免得几百页的书在后台白读。
+   */
+  function ensurePdfTexts(token) {
+    if (pdfState.texts) return Promise.resolve(pdfState.texts);
+    if (!pdfState.doc) return Promise.resolve(null);
+
+    var engine = Pdf.engine();
+    var total = pdfState.total;
+    var texts = [];
+    var done = 0;
+    var chars = 0;
+
+    return new Promise(function (resolve) {
+      function next() {
+        if (token !== pdfState.search.token || !pdfState.doc) { resolve(null); return; }
+        if (done >= total) { pdfState.texts = texts; resolve(texts); return; }
+
+        var n = done + 1;
+        engine.text(pdfState.doc, n).then(function (t) { return t; }, function () {
+          // 单页抽不出文字（扫描页 / 破损页）不算失败，当空白页跳过
+          return '';
+        }).then(function (t) {
+          if (token !== pdfState.search.token) { resolve(null); return; }
+          texts[n - 1] = t;
+          chars += t.length;
+          done++;
+          if (done === PDF_SCAN_PROBE_PAGES && Pdf.isProbablyScanned(done, chars)) {
+            // 前几页就没字，先把结论说出来 —— 别让人对着「正在读取文字…」等
+            // 几十页扫描件白白读完（实测 40 页扫描件要读上百秒）。
+            setPdfSearchStatus('这本 PDF 前 ' + done + ' 页几乎抽不到文字，' +
+              '有可能整本是扫描件… 继续确认 ' + done + ' / ' + total + ' 页');
+          } else if (done % 10 === 0 || done === total) {
+            setPdfSearchStatus('正在读取文字… ' + done + ' / ' + total + ' 页');
+          }
+          next();
+        });
+      }
+      next();
+    });
+  }
+
+  function runPdfSearch() {
+    var query = el.pdfSearchInput.value;
+    pdfState.search.query = query;
+    var token = ++pdfState.search.token;
+    pdfState.search.results = [];
+    pdfState.search.index = -1;
+    clearPdfHits();
+
+    if (!Pdf.normalizeQuery(query)) {
+      renderPdfSearchResults();
+      setPdfSearchStatus(query ? '这个关键词里没有能搜的字符。' : '输入关键词，在整份 PDF 里搜索。');
+      return;
+    }
+
+    setPdfSearchStatus('正在读取文字…');
+    renderPdfSearchResults();
+
+    ensurePdfTexts(token).then(function (texts) {
+      if (token !== pdfState.search.token || !texts) return;
+
+      var found = Pdf.searchPages(texts, query);
+      pdfState.search.results = found.results;
+      renderPdfSearchResults();
+
+      if (!found.results.length) {
+        // 先判「这本书里到底有没有字」，再说「有没有搜到」。
+        // 顺序反了会让人以为搜索坏了 —— 实测一本 40 页的图片版书，
+        // 每页都有一行页眉，于是逐页搜完 40 页、只回一句「没有找到」。
+        setPdfSearchStatus(found.looksScanned
+          ? '这本 PDF 几乎没有文字层（' + pdfState.total + ' 页一共只抽到 ' +
+            found.totalChars + ' 个字，多半是扫描件／图片版）—— 图片版里的字是像素，搜不了。'
+          : '没有找到「' + query + '」（已读 ' + found.textPages + ' 页）');
+        return;
+      }
+
+      setPdfSearchStatus('共 ' + found.results.length + ' 处' +
+        (found.truncated ? '（已达上限，只显示前 ' + found.maxResults + ' 处）' : ''));
+      selectPdfSearchHit(0);
+    });
+  }
+
+  function renderPdfSearchResults() {
+    var list = pdfState.search.results;
+    var ol = el.pdfSearchResults;
+    ol.textContent = '';
+    if (!list.length) return;
+
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < list.length; i++) {
+      var hit = list[i];
+      var li = document.createElement('li');
+      li.className = 'search-item' + (i === pdfState.search.index ? ' active' : '');
+      li.setAttribute('data-index', String(i));
+
+      var head = document.createElement('div');
+      head.className = 'search-item-chapter';
+      head.textContent = '第 ' + hit.page + ' 页';
+
+      // 摘要走正文搜索那套「转义 + 包 <mark>」的实现：PDF 里的文字同样是不可信输入，
+      // 而那份实现把越界、重叠区间的容错都写好了，没必要再维护第二份
+      var body = document.createElement('div');
+      body.className = 'search-item-snippet';
+      body.innerHTML = Search.renderHighlightedHtml(hit.snippet, [[hit.hitStart, hit.hitEnd]]);
+
+      li.appendChild(head);
+      li.appendChild(body);
+      frag.appendChild(li);
+    }
+    ol.appendChild(frag);
+
+    var active = ol.querySelector('.search-item.active');
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /** 跳到第 index 条结果。同一页就直接重画，跨页才翻页（翻页代价高）。 */
+  function selectPdfSearchHit(index) {
+    var list = pdfState.search.results;
+    if (!list.length) return;
+
+    pdfState.search.index = Math.max(0, Math.min(index, list.length - 1));
+    var hit = list[pdfState.search.index];
+    renderPdfSearchResults();
+
+    if (hit.page === pdfState.page) {
+      paintPdfHits();
+    } else {
+      // 翻页后由 renderPdfPage → attachPdfTextLayer 顺带把高亮画上
+      gotoPdfPage(hit.page);
+    }
+  }
+
+  function stepPdfSearchHit(dir) {
+    var len = pdfState.search.results.length;
+    if (!len) return;
+    var cur = pdfState.search.index;
+    var next = cur < 0
+      ? (dir > 0 ? 0 : len - 1)
+      : ((cur + dir) % len + len) % len;
+    selectPdfSearchHit(next);
+  }
+
+  var pdfSearchTimer = 0;
+
+  /** 输入防抖：每敲一个字就扫全书太浪费，停下来 220ms 再搜。 */
+  function schedulePdfSearch() {
+    if (pdfSearchTimer) clearTimeout(pdfSearchTimer);
+    pdfSearchTimer = setTimeout(function () {
+      pdfSearchTimer = 0;
+      runPdfSearch();
+    }, 220);
+  }
+
   /** PDF 视图下的快捷键。返回 true 表示已消费，调用方负责 preventDefault。 */
   function onPdfKeyDown(event) {
     if (!pdfScreenOpen()) return false;
 
+    // Ctrl/Cmd + F 要放在输入框判断之前：焦点已经在搜索框里时按 Ctrl+F，
+    // 期望是「重新选中关键词」，而不是没反应。
+    if ((event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F')) {
+      openPdfSearch();
+      return true;
+    }
+
+    // 搜索框里的回车换处、Esc 收面板，别被「翻页」截走
+    if (pdfSearchOpen() && event.target === el.pdfSearchInput) {
+      if (event.key === 'Enter') {
+        stepPdfSearchHit(event.shiftKey ? -1 : 1);
+        return true;
+      }
+      if (event.key === 'Escape') { closePdfSearch(); return true; }
+      return false;
+    }
+
     var tag = event.target && event.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
 
+    // Esc 一次只收一层：批注工具 → 搜索面板 → 关闭 PDF。
+    // 批注工具排在最前：它在 PDF 里是一种「模式」，退不出来会让人以为鼠标坏了
+    if (event.key === 'Escape') {
+      if (pdfMark.tool) { setPdfMarkTool(''); return true; }
+      if (pdfSearchOpen()) { closePdfSearch(); return true; }
+      closePdf();
+      return true;
+    }
     if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
       gotoPdfPage(pdfState.page - 1);
       return true;
@@ -1246,7 +2212,6 @@
     if (event.key === 'End') { gotoPdfPage(pdfState.total); return true; }
     if (event.key === '+' || event.key === '=') { stepPdfZoom(1); return true; }
     if (event.key === '-' || event.key === '_') { stepPdfZoom(-1); return true; }
-    if (event.key === 'Escape') { closePdf(); return true; }
     return false;
   }
 
@@ -1689,8 +2654,8 @@
 
   function openSearchPanel() {
     if (!state.book) return;
-    el.searchPanel.hidden = false;
-    el.toc.hidden = true;
+    showPanel(el.searchPanel);
+    hidePanel(el.toc);
     closeNotesPanel();
     hideToolbar();
     el.searchInput.focus();
@@ -1698,7 +2663,7 @@
   }
 
   function closeSearchPanel() {
-    el.searchPanel.hidden = true;
+    hidePanel(el.searchPanel);
     if (state.searchTimer) {
       clearTimeout(state.searchTimer);
       state.searchTimer = null;
@@ -1706,7 +2671,9 @@
   }
 
   function searchPanelOpen() {
-    return !el.searchPanel.hidden;
+    // 跟 PDF 那边同理：退场动画途中一律算「已关」
+    return !!(el.searchPanel && !el.searchPanel.hidden &&
+      el.searchPanel.classList.contains('is-open'));
   }
 
   function runSearch(raw) {
@@ -2145,19 +3112,33 @@
 
   function openNotesPanel() {
     if (!state.book) return;
-    el.notesPanel.hidden = false;
-    el.toc.hidden = true;
+    showPanel(el.notesPanel);
+    hidePanel(el.toc); // 目录与笔记互斥，两个都浮在边上会叠在一起
     closeSearchPanel();
     hideToolbar();
     renderNotesPanel();
   }
 
   function closeNotesPanel() {
-    el.notesPanel.hidden = true;
+    hidePanel(el.notesPanel);
   }
 
   function notesPanelOpen() {
-    return !el.notesPanel.hidden;
+    // 跟搜索面板同理：退场动画途中一律算「已关」
+    return !!(el.notesPanel && !el.notesPanel.hidden &&
+      el.notesPanel.classList.contains('is-open'));
+  }
+
+  function tocOpen() {
+    return !!(el.toc && !el.toc.hidden && el.toc.classList.contains('is-open'));
+  }
+
+  function openToc() {
+    showPanel(el.toc);
+  }
+
+  function closeToc() {
+    hidePanel(el.toc);
   }
 
   function renderNotesPanel() {
@@ -2523,7 +3504,7 @@
         else if (!el.hlToolbar.hidden) { hideToolbar(); clearSelection(); }
         else if (searchPanelOpen()) closeSearchPanel();
         else if (notesPanelOpen()) closeNotesPanel();
-        else el.toc.hidden = true;
+        else closeToc();
         return;
       default:
         return;
@@ -2653,20 +3634,19 @@
     el.nextBtn.addEventListener('click', function () { goChapter(1); });
 
     el.tocBtn.addEventListener('click', function () {
-      el.toc.hidden = !el.toc.hidden;
-      if (!el.toc.hidden) {
-        closeSearchPanel();
-        closeNotesPanel();
-        hideToolbar();
-      }
+      if (tocOpen()) { closeToc(); return; }
+      openToc();
+      closeSearchPanel();
+      closeNotesPanel();
+      hideToolbar();
     });
-    el.tocCloseBtn.addEventListener('click', function () { el.toc.hidden = true; });
+    el.tocCloseBtn.addEventListener('click', closeToc);
 
     el.tocList.addEventListener('click', function (event) {
       var li = event.target.closest ? event.target.closest('li[data-index]') : null;
       if (!li) return;
       renderChapter(Number(li.getAttribute('data-index')), 0);
-      el.toc.hidden = true;
+      closeToc();
       el.content.focus();
     });
 
@@ -2840,8 +3820,8 @@
       if (!el.notePopover.hidden && !el.notePopover.contains(target)) {
         closeNoteEditor();
       }
-      if (!el.toc.hidden && !el.toc.contains(target) && !el.tocBtn.contains(target)) {
-        el.toc.hidden = true;
+      if (tocOpen() && !el.toc.contains(target) && !el.tocBtn.contains(target)) {
+        closeToc();
       }
       if (searchPanelOpen() && !el.searchPanel.contains(target) && !el.searchBtn.contains(target)) {
         closeSearchPanel();
@@ -2866,6 +3846,22 @@
     el.pdfFit.addEventListener('click', togglePdfFit);
     el.pdfTheme.addEventListener('click', function () { el.themeBtn.click(); });
 
+    el.pdfSearchBtn.addEventListener('click', function () {
+      if (pdfSearchOpen()) closePdfSearch();
+      else openPdfSearch();
+    });
+    el.pdfSearchInput.addEventListener('input', schedulePdfSearch);
+    el.pdfSearchPrev.addEventListener('click', function () { stepPdfSearchHit(-1); });
+    el.pdfSearchNext.addEventListener('click', function () { stepPdfSearchHit(1); });
+    el.pdfSearchClose.addEventListener('click', closePdfSearch);
+    el.pdfSearchResults.addEventListener('click', function (event) {
+      var li = event.target && event.target.closest ? event.target.closest('.search-item') : null;
+      if (!li) return;
+      selectPdfSearchHit(parseInt(li.getAttribute('data-index'), 10) || 0);
+    });
+
+    bindPdfMarkEvents();
+
     document.addEventListener('keydown', onKeyDown);
 
     // 窗口大小变了，一屏能放的字也变了 —— 分页模式下必须重新切页，
@@ -2878,8 +3874,14 @@
           applySpreadChrome();
           repaginate(currentOffset());
         }
-        // PDF：适应模式下缩放比随窗口变，要按新尺寸重画当前页
-        if (pdfScreenOpen() && pdfState.fit !== 'manual') renderPdfPage();
+        // PDF：适应模式下缩放比随窗口变，要按新尺寸重画当前页；
+        // 手动缩放时画布尺寸不变，但批注的像素位置仍要跟着重算（便宜，且不会漏）
+        if (pdfScreenOpen()) {
+          if (pdfState.fit !== 'manual') renderPdfPage();
+          else paintPdfMarks();
+        }
+        // 顶栏与底栏可能因换行 / 字号变高，面板的位置与页面可用宽度都要重算
+        if (pdfSearchOpen()) syncPdfSearchPanelBox();
       }, 160);
     });
     window.addEventListener('beforeunload', function () {
@@ -2995,10 +3997,29 @@
     el.pdfBack = $('pdf-back');
     el.pdfView = $('pdf-view');
     el.pdfCanvas = $('pdf-canvas');
+    el.pdfTextLayer = $('pdf-text-layer');
     el.pdfHint = $('pdf-hint');
     el.pdfRange = $('pdf-range');
     el.pdfPct = $('pdf-pct');
     el.pdfStatus = $('pdf-status');
+    el.pdfSearchBtn = $('pdf-search-btn');
+    el.pdfSearchPanel = $('pdf-search-panel');
+    el.pdfSearchInput = $('pdf-search-input');
+    el.pdfSearchPrev = $('pdf-search-prev');
+    el.pdfSearchNext = $('pdf-search-next');
+    el.pdfSearchClose = $('pdf-search-close');
+    el.pdfSearchCount = $('pdf-search-count');
+    el.pdfSearchResults = $('pdf-search-results');
+
+    el.pdfPageWrap = $('pdf-page-wrap');
+    el.pdfMarkLayer = $('pdf-mark-layer');
+    el.pdfNoteLayer = $('pdf-note-layer');
+    el.pdfMarkRect = $('pdf-mark-rect');
+    el.pdfMarkInk = $('pdf-mark-ink');
+    el.pdfMarkNote = $('pdf-mark-note');
+    el.pdfMarkColors = $('pdf-mark-colors');
+    el.pdfMarkUndo = $('pdf-mark-undo');
+    el.pdfMarkTip = $('pdf-mark-tip');
 
     el.toast = $('toast');
   }

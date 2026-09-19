@@ -50,7 +50,7 @@ const PRODUCED = (function () {
 })();
 
 test('index.html 引入了全部解析层与界面脚本，且 app.js 最后加载', () => {
-  ['src/encoding.js', 'src/parser.js', 'src/epub.js', 'src/convert.js', 'src/paginate.js', 'src/cover.js', 'src/app.js'].forEach((f) => {
+  ['src/encoding.js', 'src/parser.js', 'src/epub.js', 'src/convert.js', 'src/paginate.js', 'src/cover.js', 'src/pdfannot.js', 'src/app.js'].forEach((f) => {
     assert.ok(SCRIPT_SRCS.includes(f), 'index.html 未引入 ' + f);
   });
   assert.equal(SCRIPT_SRCS[SCRIPT_SRCS.length - 1], 'src/app.js', 'app.js 必须最后加载');
@@ -58,7 +58,7 @@ test('index.html 引入了全部解析层与界面脚本，且 app.js 最后加�
 
 test('每个非 app 脚本都在浏览器环境下暴露了模块', () => {
   const scripts = SCRIPT_SRCS.filter((src) => !/app\.js$/.test(src));
-  assert.ok(scripts.length >= 15, '引入的脚本数量异常：' + scripts.length);
+  assert.ok(scripts.length >= 16, '引入的脚本数量异常：' + scripts.length);
 
   const providers = new Set(Object.values(PRODUCED));
   scripts.forEach((src) => {

@@ -300,15 +300,56 @@
       <button id="pdf-fit" class="icon-btn" type="button" title="在适应宽度 / 整页之间切换">适应宽度</button>
     </div>
 
+    <button id="pdf-search-btn" class="icon-btn" type="button" title="在整份 PDF 里搜索（Ctrl+F）">搜索</button>
+
+    <span class="bar-divider"></span>
+
+    <!-- 批注工具：整体是一组互斥的单选按钮（同一时刻只激活一个），
+         所以用 .bar-group 抱团；再点一次当前工具即退出，回到文字划选 -->
+    <div class="bar-group" id="pdf-mark-group">
+      <button id="pdf-mark-rect" class="icon-btn" type="button" title="框选高亮（拖一个框）">框选</button>
+      <button id="pdf-mark-ink" class="icon-btn" type="button" title="手绘（按住拖出笔迹）">手绘</button>
+      <button id="pdf-mark-note" class="icon-btn" type="button" title="便签（点一下贴一张）">便签</button>
+      <span id="pdf-mark-colors" class="mark-colors" role="group" aria-label="批注颜色">
+        <button class="mark-color is-yellow" type="button" data-color="yellow" title="黄色"></button>
+        <button class="mark-color is-green" type="button" data-color="green" title="绿色"></button>
+        <button class="mark-color is-blue" type="button" data-color="blue" title="蓝色"></button>
+        <button class="mark-color is-pink" type="button" data-color="pink" title="粉色"></button>
+      </span>
+      <button id="pdf-mark-undo" class="icon-btn" type="button" title="撤销上一处批注">撤销</button>
+    </div>
+
+    <!-- 工具激活时才出现的操作说明：批注是「有模式」的交互，
+         不写清楚「怎么退出、怎么删」用户只能靠猜 -->
+    <p id="pdf-mark-tip" class="pdf-mark-tip" hidden></p>
+
     <button id="pdf-theme" class="icon-btn" type="button" title="切换日间 / 夜间">主题</button>
   </header>
 
   <div id="pdf-view" class="pdf-view">
     <div id="pdf-page-wrap" class="pdf-page-wrap">
       <canvas id="pdf-canvas"></canvas>
+      <!-- 透明文字层：让 PDF 能像网页那样划选、复制，也是搜索高亮的落点 -->
+      <div id="pdf-text-layer" class="textLayer"></div>
+      <!-- 批注层：独立一层 SVG，用归一化坐标画，所以改缩放 / 换适应模式都不会漂。
+           默认 pointer-events:none —— 让文字层照常划选；只有激活了批注工具才接管鼠标 -->
+      <svg id="pdf-mark-layer" class="pdf-mark-layer" aria-hidden="true"></svg>
+      <!-- 便签气泡挂在这里，坐标由 app.js 按当前页面像素尺寸换算 -->
+      <div id="pdf-note-layer" class="pdf-note-layer"></div>
       <p id="pdf-hint" class="pdf-hint">正在渲染…</p>
     </div>
   </div>
+
+  <aside id="pdf-search-panel" class="search-panel" hidden>
+    <div class="side-head">
+      <input id="pdf-search-input" type="search" placeholder="在整份 PDF 里搜索…" autocomplete="off" spellcheck="false" />
+      <button id="pdf-search-prev" class="icon-btn" type="button" title="上一处（Shift+Enter）">↑</button>
+      <button id="pdf-search-next" class="icon-btn" type="button" title="下一处（Enter）">↓</button>
+      <button id="pdf-search-close" class="link-btn" type="button">关闭</button>
+    </div>
+    <p id="pdf-search-count" class="side-count muted">输入关键词，在整份 PDF 里搜索。</p>
+    <ol id="pdf-search-results" class="search-results"></ol>
+  </aside>
 
   <footer class="pdf-foot">
     <span id="pdf-pct" class="muted">0%</span>
@@ -336,6 +377,7 @@
 <script src="src/readingprefs.js"></script>
 <script src="src/cover.js"></script>
 <script src="src/pdf.js"></script>
+<script src="src/pdfannot.js"></script>
 <script src="src/app.js"></script>
 </body>
 </html>

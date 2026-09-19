@@ -182,7 +182,8 @@ async function clickShelfOpen(page) {
   log('   改搜 "C++"（正则元字符）：' + literal);
 
   await page.press('#search-input', 'Escape');
-  await page.waitForTimeout(200);
+  // 收起有 180ms 退场动画，等面板真正 hidden 再判，别拿固定延时赌
+  await page.waitForSelector('#search-panel[hidden]', { timeout: 3000 }).catch(() => {});
   log('   Esc 后面板关闭=' + (!(await page.locator('#search-panel').isVisible())));
 
   /* ---- 进度条拖动 ---- */
@@ -330,7 +331,7 @@ async function clickShelfOpen(page) {
 
     // 笔记面板
     await page.click('#btn-notes');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(300); // 面板是「先显形再播 180ms 入场」，等它落定
     const panel = await page.evaluate(() => ({
       visible: !document.getElementById('notes-panel').hidden,
       items: document.querySelectorAll('#notes-list .note-item').length,
@@ -453,22 +454,36 @@ async function clickShelfOpen(page) {
   /* ---- 点面板外部自动关闭 ---- */
   log('');
   await page.click('#btn-toc');
-  await page.waitForTimeout(120);
+  // 打开必须立刻带上 is-open：它是「算不算开着」的判据，晚一帧就会出现状态错位
+  if (!(await page.$eval('#toc', (el) => !el.hidden && el.classList.contains('is-open')))) {
+    throw new Error('目录面板打开后没有立刻带上 is-open');
+  }
   const tocWasOpen = await page.locator('#toc').isVisible();
   await page.mouse.click(620, 520);
-  await page.waitForTimeout(150);
+  // 收起是「先摘 is-open 播动画，180ms 后才 hidden」——必须等状态，不能死等一个比动画短的时间
+  if (!(await page.$eval('#toc', (el) => !el.classList.contains('is-open')))) {
+    throw new Error('目录面板收起后 is-open 没有立刻摘掉');
+  }
+  await page.waitForSelector('#toc[hidden]', { timeout: 3000 }).catch(() => {});
   const tocClosedByOutside = !(await page.locator('#toc').isVisible());
 
   await page.click('#btn-search');
-  await page.waitForTimeout(120);
+  if (!(await page.$eval('#search-panel', (el) => el.classList.contains('is-open')))) {
+    throw new Error('搜索面板打开后没有立刻带上 is-open');
+  }
   await page.mouse.click(620, 520);
-  await page.waitForTimeout(150);
+  await page.waitForSelector('#search-panel[hidden]', { timeout: 3000 }).catch(() => {});
   const searchClosedByOutside = !(await page.locator('#search-panel').isVisible());
 
   await page.click('#btn-notes');
-  await page.waitForTimeout(120);
+  if (!(await page.$eval('#notes-panel', (el) => !el.hidden && el.classList.contains('is-open')))) {
+    throw new Error('笔记面板打开后没有立刻带上 is-open');
+  }
   await page.mouse.click(620, 520);
-  await page.waitForTimeout(150);
+  if (!(await page.$eval('#notes-panel', (el) => !el.classList.contains('is-open')))) {
+    throw new Error('笔记面板收起后 is-open 没有立刻摘掉');
+  }
+  await page.waitForSelector('#notes-panel[hidden]', { timeout: 3000 }).catch(() => {});
   const notesClosedByOutside = !(await page.locator('#notes-panel').isVisible());
 
   log('14. 点面板外部自动关闭：目录 ' + (tocWasOpen && tocClosedByOutside ? 'OK' : 'FAIL') +
